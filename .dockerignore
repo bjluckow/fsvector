@@ -1,0 +1,21 @@
+# git
+.git/
+.gitignore
+
+# binaries (built inside Docker, not copied from host)
+bin/
+
+# environment
+.env
+
+# python
+**/__pycache__/
+**/*.pyc
+**/.venv/
+
+# docs
+docs/
+
+# os
+.DS_Store
+Thumbs.db
