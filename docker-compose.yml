@@ -1,0 +1,78 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_DB: fsvector
+      POSTGRES_USER: fsvector
+      POSTGRES_PASSWORD: fsvector
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U fsvector"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  embedsvc:
+    build: services/embedsvc
+    environment:
+      EMBED_MODEL: ${EMBED_MODEL:-sentence-transformers/all-MiniLM-L6-v2}
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  convertd:
+    build: services/convertd
+    ports:
+      - "8001:8001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  fsvectord:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+      target: fsvectord
+    volumes:
+      - ${SOURCE_DIR:-/tmp/fsvector-source}:/data/source:ro
+    environment:
+      DATABASE_URL: postgres://fsvector:fsvector@postgres:5432/fsvector
+      EMBEDSVC_URL: http://embedsvc:8000
+      CONVERTSVC_URL: http://convertd:8001
+      WATCH_PATH: /data/source
+      EMBED_MODEL: ${EMBED_MODEL:-sentence-transformers/all-MiniLM-L6-v2}
+      SOURCE: ${SOURCE:-local}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      embedsvc:
+        condition: service_healthy
+      convertd:
+        condition: service_healthy
+    restart: unless-stopped
+
+  fsvector:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+      target: fsvector
+    environment:
+      DATABASE_URL: postgres://fsvector:fsvector@postgres:5432/fsvector
+      EMBEDSVC_URL: http://embedsvc:8000
+    depends_on:
+      postgres:
+        condition: service_healthy
+    profiles:
+      - cli
+
+volumes:
+  pgdata:
