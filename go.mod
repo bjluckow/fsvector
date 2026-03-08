@@ -5,6 +5,7 @@ go 1.25.4
 require (
 	github.com/gabriel-vasile/mimetype v1.4.13
 	github.com/jackc/pgx/v5 v5.8.0
+	github.com/pgvector/pgvector-go v0.3.0
 	github.com/spf13/cobra v1.8.1
 )
 
