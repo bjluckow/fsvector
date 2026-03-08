@@ -3,6 +3,7 @@ module github.com/bjluckow/fsvector
 go 1.25.4
 
 require (
+	github.com/gabriel-vasile/mimetype v1.4.13
 	github.com/jackc/pgx/v5 v5.8.0
 	github.com/spf13/cobra v1.8.1
 )
