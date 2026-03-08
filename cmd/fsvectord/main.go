@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/bjluckow/fsvector/internal/config"
 	"github.com/bjluckow/fsvector/internal/convert"
@@ -11,11 +13,13 @@ import (
 	"github.com/bjluckow/fsvector/internal/fsindex"
 	"github.com/bjluckow/fsvector/internal/pipeline"
 	"github.com/bjluckow/fsvector/internal/store"
+	"github.com/bjluckow/fsvector/internal/watcher"
 	"github.com/jackc/pgx/v5"
 )
 
 func main() {
-	ctx := context.Background()
+	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer cancel()
 
 	cfg, err := config.Load()
 	if err != nil {
@@ -76,8 +80,18 @@ func main() {
 		fmt.Fprintf(os.Stderr, "fsvectord: reconcile: %v\n", err)
 		os.Exit(1)
 	}
+	fmt.Println("fsvectord ready — watching for changes")
 
-	fmt.Println("fsvectord ready")
+	events := make(chan watcher.Event, 64)
+
+	go func() {
+		if err := watcher.Watch(ctx, cfg.WatchPath, events); err != nil {
+			fmt.Fprintf(os.Stderr, "watcher: %v\n", err)
+			os.Exit(1)
+		}
+	}()
+
+	handleEvents(ctx, conn, pCfg, events)
 }
 
 // reconcile diffs the filesystem against the database and brings the DB
@@ -179,4 +193,44 @@ func reconcile(ctx context.Context, conn *pgx.Conn, pCfg pipeline.Config, watchP
 	fmt.Printf("  reconcile done: %d indexed, %d deleted, %d unchanged\n",
 		indexed, deleted, skipped)
 	return nil
+}
+
+func handleEvents(ctx context.Context, conn *pgx.Conn, pCfg pipeline.Config, events <-chan watcher.Event) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case e := <-events:
+			switch e.Kind {
+			case watcher.EventDelete:
+				if err := store.SoftDelete(ctx, conn, e.Path); err != nil {
+					fmt.Fprintf(os.Stderr, "delete %s: %v\n", e.Path, err)
+				} else {
+					fmt.Printf("  deleted %s\n", e.Path)
+				}
+
+			case watcher.EventCreate, watcher.EventUpdate:
+				fi, err := fsindex.FileInfoFromPath(e.Path)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "  stat %s: %v\n", e.Path, err)
+					continue
+				}
+
+				result, err := pipeline.Process(ctx, pCfg, fi)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "  pipeline %s: %v\n", e.Path, err)
+					continue
+				}
+				if result.Skipped {
+					continue
+				}
+
+				if err := store.Upsert(ctx, conn, result.File); err != nil {
+					fmt.Fprintf(os.Stderr, "  upsert %s: %v\n", e.Path, err)
+					continue
+				}
+				fmt.Printf("  %s %s (%s)\n", e.Kind, e.Path, result.File.Modality)
+			}
+		}
+	}
 }

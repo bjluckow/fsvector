@@ -3,6 +3,7 @@ package fsindex
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"io"
 	"io/fs"
 	"os"
@@ -96,4 +97,39 @@ func detectMime(path string) (string, error) {
 		return "", err
 	}
 	return mime.String(), nil
+}
+
+// FileInfoFromPath returns a FileInfo for a single file path.
+// Used by the watcher to process individual file events.
+func FileInfoFromPath(path string) (FileInfo, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return FileInfo{}, fmt.Errorf("stat %s: %w", path, err)
+	}
+	if !info.Mode().IsRegular() {
+		return FileInfo{}, fmt.Errorf("%s is not a regular file", path)
+	}
+
+	hash, err := hashFile(path)
+	if err != nil {
+		return FileInfo{}, fmt.Errorf("hash %s: %w", path, err)
+	}
+
+	mime, err := detectMime(path)
+	if err != nil {
+		mime = "application/octet-stream"
+	}
+
+	ext := strings.TrimPrefix(filepath.Ext(info.Name()), ".")
+
+	return FileInfo{
+		Path:       path,
+		Name:       info.Name(),
+		Ext:        strings.ToLower(ext),
+		Size:       info.Size(),
+		MimeType:   mime,
+		Hash:       hash,
+		ModifiedAt: info.ModTime(),
+		CreatedAt:  createdAt(info),
+	}, nil
 }
