@@ -82,12 +82,19 @@ def _convert_image(input_path: str, output_path: str):
         )
 
 def _convert_text(input_path: str, output_path: str):
-    result = subprocess.run(
-        ["pandoc", input_path, "-o", output_path, "--to", "plain"],
-        capture_output=True,
-    )
+    ext = Path(input_path).suffix.lower()
+    if ext == ".pdf":
+        result = subprocess.run(
+            ["pdftotext", input_path, output_path],
+            capture_output=True,
+        )
+    else:
+        result = subprocess.run(
+            ["pandoc", input_path, "-o", output_path, "--to", "plain"],
+            capture_output=True,
+        )
     if result.returncode != 0:
         raise HTTPException(
             status_code=500,
-            detail=f"pandoc error: {result.stderr.decode()}"
+            detail=f"conversion error: {result.stderr.decode()}"
         )

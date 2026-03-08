@@ -10,7 +10,7 @@ MODEL_NAME = os.environ.get("EMBED_MODEL", "clip-ViT-B-32")
 
 print(f"loading model: {MODEL_NAME}")
 model = SentenceTransformer(MODEL_NAME)
-DIM = model.get_sentence_embedding_dimension()
+DIM = model.encode("test").shape[0]
 print(f"model loaded: dim={DIM}")
 
 app = FastAPI()
