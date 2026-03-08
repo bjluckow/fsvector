@@ -19,18 +19,21 @@ services:
     build: services/embedsvc
     environment:
       EMBED_MODEL: ${EMBED_MODEL:-clip-ViT-B-32}
+    volumes:
+      - hf-cache:/root/.cache/huggingface
     ports:
-      - "8000:8000"
+      - "8100:8000"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 5s
       timeout: 3s
-      retries: 5
+      retries: 5 
+      start_period: 120s
 
   convertsvc:
     build: services/convertsvc
     ports:
-      - "8001:8001"
+      - "8101:8001"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
       interval: 5s
@@ -76,3 +79,4 @@ services:
 
 volumes:
   pgdata:
+  hf-cache:
