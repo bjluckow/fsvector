@@ -20,11 +20,3 @@ COPY --from=builder /out/fsvectord /usr/local/bin/fsvectord
 
 ENTRYPOINT ["fsvectord"]
 
-# ── fsvector runtime ──────────────────────────────────────────────────────────
-FROM alpine:3.19 AS fsvector
-
-RUN apk add --no-cache ca-certificates tzdata
-
-COPY --from=builder /out/fsvector /usr/local/bin/fsvector
-
-ENTRYPOINT ["fsvector"]
