@@ -9,7 +9,7 @@ import (
 
 	"github.com/bjluckow/fsvector/internal/config"
 	"github.com/bjluckow/fsvector/internal/embed"
-	"github.com/bjluckow/fsvector/internal/store"
+	"github.com/bjluckow/fsvector/internal/search"
 	"github.com/jackc/pgx/v5"
 	"github.com/spf13/cobra"
 )
@@ -89,7 +89,10 @@ var searchCmd = &cobra.Command{
 			return fmt.Errorf("embed query: %w", err)
 		}
 
-		results, err := store.Search(ctx, conn, vectors[0], searchLimit)
+		results, err := search.Search(ctx, conn, search.SearchQuery{
+			Vector: vectors[0],
+			Limit:  searchLimit,
+		})
 		if err != nil {
 			return err
 		}
@@ -126,7 +129,10 @@ var lsCmd = &cobra.Command{
 		conn, _ := mustConnect()
 		defer conn.Close(ctx)
 
-		files, err := store.Ls(ctx, conn, lsDeleted)
+		files, err := search.List(ctx, conn, search.ListQuery{
+			Limit:          100,
+			IncludeDeleted: lsDeleted,
+		})
 		if err != nil {
 			return err
 		}
@@ -171,7 +177,7 @@ var showCmd = &cobra.Command{
 		conn, _ := mustConnect()
 		defer conn.Close(ctx)
 
-		f, err := store.Show(ctx, conn, args[0])
+		f, err := search.Show(ctx, conn, args[0])
 		if err != nil {
 			return err
 		}
@@ -207,7 +213,7 @@ var statsCmd = &cobra.Command{
 		conn, _ := mustConnect()
 		defer conn.Close(ctx)
 
-		s, err := store.GetStats(ctx, conn)
+		s, err := search.GetStats(ctx, conn)
 		if err != nil {
 			return err
 		}
