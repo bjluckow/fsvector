@@ -63,20 +63,6 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
-  fsvector:
-    build:
-      context: .
-      dockerfile: docker/Dockerfile
-      target: fsvector
-    environment:
-      DATABASE_URL: postgres://fsvector:fsvector@postgres:5432/fsvector
-      EMBEDSVC_URL: http://embedsvc:8000
-    depends_on:
-      postgres:
-        condition: service_healthy
-    profiles:
-      - cli
-
 volumes:
   pgdata:
   hf-cache:
