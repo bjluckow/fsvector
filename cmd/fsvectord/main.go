@@ -29,15 +29,25 @@ func main() {
 
 	fmt.Println("fsvectord starting")
 
+	// ── clients ───────────────────────────────────────────────────────────────
+	textEmbed := embed.NewTextClient(cfg.TextEmbedSvcURL)    // temporary — M1.2.5
+	imageEmbed := embed.NewImageClient(cfg.ImageEmbedSvcURL) // temporary — M1.2.5
+	convertClient := convert.NewClient(cfg.ConvertSvcURL)
+
 	// ── connect to embedsvc, get dimension ───────────────────────────────────
-	textEmbed := embed.NewTextClient(cfg.EmbedSvcURL)   // temporary stub — M1.2.5 splits these
-	imageEmbed := embed.NewImageClient(cfg.EmbedSvcURL) // temporary stub — M1.2.5 splits these
-	health, err := imageEmbed.Health(ctx)               // use image health as proxy for now
+	textHealth, err := textEmbed.Health(ctx)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "fsvectord: embedsvc unreachable: %v\n", err)
+		fmt.Fprintf(os.Stderr, "fsvectord: embedsvc-text unreachable: %v\n", err)
 		os.Exit(1)
 	}
-	fmt.Printf("  embed model: %s (dim=%d)\n", health.Model, health.Dim)
+	fmt.Printf("  text model : %s (dim=%d)\n", textHealth.Model, textHealth.Dim)
+
+	imageHealth, err := imageEmbed.Health(ctx)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "fsvectord: embedsvc-image unreachable: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("  image model: %s (dim=%d)\n", imageHealth.Model, imageHealth.Dim)
 
 	// ── connect to postgres ───────────────────────────────────────────────────
 	conn, err := pgx.Connect(ctx, cfg.DatabaseURL)
@@ -48,31 +58,31 @@ func main() {
 	defer conn.Close(ctx)
 
 	// ── migrate ───────────────────────────────────────────────────────────────
-	if err := store.Migrate(ctx, conn, health.Dim); err != nil {
+	if err := store.Migrate(ctx, conn, textHealth.Dim, imageHealth.Dim); err != nil {
 		fmt.Fprintf(os.Stderr, "fsvectord: migrate: %v\n", err)
 		os.Exit(1)
 	}
 	fmt.Println("  schema ok")
 
 	// ── register model ────────────────────────────────────────────────────────
-	if err := store.RegisterModel(ctx, conn, "text", health.Model, health.Dim); err != nil {
-		fmt.Fprintf(os.Stderr, "fsvectord: register model: %v\n", err)
+	if err := store.RegisterModel(ctx, conn, "text", textHealth.Model, textHealth.Dim); err != nil {
+		fmt.Fprintf(os.Stderr, "fsvectord: register text model: %v\n", err)
 		os.Exit(1)
 	}
-	if err := store.RegisterModel(ctx, conn, "image", health.Model, health.Dim); err != nil {
-		fmt.Fprintf(os.Stderr, "fsvectord: register model: %v\n", err)
+	if err := store.RegisterModel(ctx, conn, "image", imageHealth.Model, imageHealth.Dim); err != nil {
+		fmt.Fprintf(os.Stderr, "fsvectord: register image model: %v\n", err)
 		os.Exit(1)
 	}
-	fmt.Printf("  registered model: %s (image)\n", health.Model)
+	fmt.Printf("  schema ok\n")
 
 	// ── reconcile ─────────────────────────────────────────────────────────────
-	convertClient := convert.NewClient(cfg.ConvertSvcURL)
 	pCfg := pipeline.Config{
-		TextEmbed:     textEmbed,
-		ImageEmbed:    imageEmbed,
-		ConvertClient: convertClient,
-		EmbedModel:    health.Model,
-		Source:        cfg.Source,
+		TextEmbed:       textEmbed,
+		ImageEmbed:      imageEmbed,
+		ConvertClient:   convertClient,
+		TextEmbedModel:  textHealth.Model,
+		ImageEmbedModel: imageHealth.Model,
+		Source:          cfg.Source,
 	}
 
 	if err := reconcile(ctx, conn, pCfg, cfg.WatchPath); err != nil {
@@ -146,19 +156,26 @@ func reconcile(ctx context.Context, conn *pgx.Conn, pCfg pipeline.Config, watchP
 			fmt.Fprintf(os.Stderr, "    hash check %s: %v\n", fi.Path, err)
 			continue
 		} else if isDupe && canonicalPath != fi.Path {
+			modality, _ := pipeline.Modality(fi.Ext)
+			embedModel := pCfg.TextEmbedModel
+			if modality == "image" {
+				embedModel = pCfg.ImageEmbedModel
+			}
+
 			f := store.File{
 				Path:           fi.Path,
 				Source:         pCfg.Source,
 				ContentHash:    fi.Hash,
 				Size:           fi.Size,
 				MimeType:       fi.MimeType,
-				Modality:       "text",
+				Modality:       modality,
 				FileName:       fi.Name,
 				FileExt:        fi.Ext,
 				FileCreatedAt:  &fi.CreatedAt,
 				FileModifiedAt: &fi.ModifiedAt,
-				EmbedModel:     pCfg.EmbedModel,
+				EmbedModel:     embedModel,
 			}
+
 			if err := store.UpsertDuplicate(ctx, conn, f, canonicalPath); err != nil {
 				fmt.Fprintf(os.Stderr, "    dupe upsert %s: %v\n", fi.Path, err)
 			} else {

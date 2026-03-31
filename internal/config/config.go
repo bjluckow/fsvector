@@ -14,8 +14,9 @@ type Config struct {
 	DatabaseURL string
 
 	// Services
-	EmbedSvcURL   string
-	ConvertSvcURL string
+	TextEmbedSvcURL  string
+	ImageEmbedSvcURL string
+	ConvertSvcURL    string
 
 	// Daemon
 	WatchPath    string
@@ -28,12 +29,13 @@ type Config struct {
 // Returns an error if any required variable is missing.
 func Load() (*Config, error) {
 	c := &Config{
-		DatabaseURL:   env("DATABASE_URL", ""),
-		EmbedSvcURL:   env("EMBEDSVC_URL", "http://embedsvc:8000"),
-		ConvertSvcURL: env("CONVERTSVC_URL", "http://convertd:8001"),
-		WatchPath:     env("WATCH_PATH", "/data/source"),
-		EmbedModel:    env("EMBED_MODEL", "sentence-transformers/all-MiniLM-L6-v2"),
-		Source:        env("SOURCE", "local"),
+		DatabaseURL:      env("DATABASE_URL", ""),
+		TextEmbedSvcURL:  env("TEXT_EMBEDSVC_URL", "http://embedsvc-text:8000"),
+		ImageEmbedSvcURL: env("IMAGE_EMBEDSVC_URL", "http://embedsvc-image:8000"),
+		ConvertSvcURL:    env("CONVERTSVC_URL", "http://convertsvc:8001"),
+		WatchPath:        env("WATCH_PATH", "/data/source"),
+		EmbedModel:       env("EMBED_MODEL", "sentence-transformers/all-MiniLM-L6-v2"),
+		Source:           env("SOURCE", "local"),
 	}
 
 	if c.DatabaseURL == "" {

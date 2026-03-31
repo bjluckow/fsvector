@@ -43,20 +43,28 @@ type SearchQuery struct {
 func Search(ctx context.Context, conn *pgx.Conn, q SearchQuery) ([]SearchResult, error) {
 	v := pgvector.NewVector(q.Vector)
 
-	sql := `
-		SELECT
-			path,
-			modality,
-			file_ext,
-			size,
-			1 - (embedding <=> $1) AS score,
-			indexed_at,
-			file_modified_at
-		FROM files
-		WHERE deleted_at IS NULL
-		  AND canonical_path IS NULL
-		  AND embedding IS NOT NULL
-	`
+	// select the right embedding column based on modality filter
+	// if no modality filter, search text by default
+	embeddingCol := "text_embedding"
+	if q.Modality == "image" {
+		embeddingCol = "image_embedding"
+	}
+
+	sql := fmt.Sprintf(`
+        SELECT
+            path,
+            modality,
+            file_ext,
+            size,
+            1 - (%s <=> $1) AS score,
+            indexed_at,
+            file_modified_at
+        FROM files
+        WHERE deleted_at IS NULL
+          AND retired_at IS NULL
+          AND canonical_path IS NULL
+          AND %s IS NOT NULL
+    `, embeddingCol, embeddingCol)
 
 	args := []any{v, q.Limit, q.Offset}
 	idx := 4 // next parameter index

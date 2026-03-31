@@ -35,7 +35,8 @@ CREATE TABLE IF NOT EXISTS files (
     file_created_at   TIMESTAMPTZ,
     file_modified_at  TIMESTAMPTZ,
     embed_model       TEXT NOT NULL,
-    embedding         vector(%%EMBEDDING_DIM%%),
+    text_embedding    vector(%%TEXT_DIM%%),
+    image_embedding   vector(%%IMAGE_DIM%%),
     chunk_index       INT NOT NULL DEFAULT 0,
     metadata          JSONB,
     indexed_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -56,11 +57,19 @@ CREATE UNIQUE INDEX IF NOT EXISTS files_canonical_hash_idx
       AND deleted_at IS NULL
       AND retired_at IS NULL;
 
-CREATE INDEX IF NOT EXISTS files_embedding_idx
-    ON files USING hnsw (embedding vector_cosine_ops)
+CREATE INDEX IF NOT EXISTS files_text_embedding_idx
+    ON files USING hnsw (text_embedding vector_cosine_ops)
     WHERE deleted_at IS NULL
       AND retired_at IS NULL
-      AND canonical_path IS NULL;
+      AND canonical_path IS NULL
+      AND modality = 'text';
+
+CREATE INDEX IF NOT EXISTS files_image_embedding_idx
+    ON files USING hnsw (image_embedding vector_cosine_ops)
+    WHERE deleted_at IS NULL
+      AND retired_at IS NULL
+      AND canonical_path IS NULL
+      AND modality = 'image';
 
 CREATE INDEX IF NOT EXISTS files_modified_at_idx
     ON files (file_modified_at)

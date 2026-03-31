@@ -95,7 +95,7 @@ var searchCmd = &cobra.Command{
 		conn, cfg := mustConnect()
 		defer conn.Close(ctx)
 
-		textEmbed := embed.NewTextClient(cfg.EmbedSvcURL)
+		textEmbed := embed.NewTextClient(cfg.TextEmbedSvcURL)
 		vectors, err := textEmbed.EmbedTexts(ctx, []string{args[0]})
 		if err != nil {
 			return fmt.Errorf("embed query: %w", err)

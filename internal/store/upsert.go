@@ -31,47 +31,53 @@ type File struct {
 // Upsert inserts or updates a file row, including its embedding.
 // Matches on (path, chunk_index).
 func Upsert(ctx context.Context, conn *pgx.Conn, f File) error {
-	var embedding *pgvector.Vector
-	if f.Embedding != nil {
+	var textEmbedding, imageEmbedding *pgvector.Vector
+
+	if f.Modality == "text" && f.Embedding != nil {
 		v := pgvector.NewVector(f.Embedding)
-		embedding = &v
+		textEmbedding = &v
+	}
+	if f.Modality == "image" && f.Embedding != nil {
+		v := pgvector.NewVector(f.Embedding)
+		imageEmbedding = &v
 	}
 
 	_, err := conn.Exec(ctx, `
-		INSERT INTO files (
-			path, source, canonical_path,
-			content_hash, size, mime_type, modality,
-			file_name, file_ext, file_created_at, file_modified_at,
-			embed_model, embedding, chunk_index,
-			metadata, indexed_at, deleted_at
-		) VALUES (
-			$1, $2, $3,
-			$4, $5, $6, $7,
-			$8, $9, $10, $11,
-			$12, $13, $14,
-			$15, now(), NULL
-		)
-		ON CONFLICT (path, chunk_index, embed_model) DO UPDATE SET
-			source           = EXCLUDED.source,
-			canonical_path   = EXCLUDED.canonical_path,
-			content_hash     = EXCLUDED.content_hash,
-			size             = EXCLUDED.size,
-			mime_type        = EXCLUDED.mime_type,
-			modality         = EXCLUDED.modality,
-			file_name        = EXCLUDED.file_name,
-			file_ext         = EXCLUDED.file_ext,
-			file_created_at  = EXCLUDED.file_created_at,
-			file_modified_at = EXCLUDED.file_modified_at,
-			embed_model      = EXCLUDED.embed_model,
-			embedding        = EXCLUDED.embedding,
-			metadata         = EXCLUDED.metadata,
-			indexed_at       = now(),
-			deleted_at       = NULL
-	`,
+        INSERT INTO files (
+            path, source, canonical_path,
+            content_hash, size, mime_type, modality,
+            file_name, file_ext, file_created_at, file_modified_at,
+            embed_model, text_embedding, image_embedding, chunk_index,
+            metadata, indexed_at, deleted_at
+        ) VALUES (
+            $1, $2, $3,
+            $4, $5, $6, $7,
+            $8, $9, $10, $11,
+            $12, $13, $14, $15,
+            $16, now(), NULL
+        )
+        ON CONFLICT (path, chunk_index, embed_model) DO UPDATE SET
+            source           = EXCLUDED.source,
+            canonical_path   = EXCLUDED.canonical_path,
+            content_hash     = EXCLUDED.content_hash,
+            size             = EXCLUDED.size,
+            mime_type        = EXCLUDED.mime_type,
+            modality         = EXCLUDED.modality,
+            file_name        = EXCLUDED.file_name,
+            file_ext         = EXCLUDED.file_ext,
+            file_created_at  = EXCLUDED.file_created_at,
+            file_modified_at = EXCLUDED.file_modified_at,
+            embed_model      = EXCLUDED.embed_model,
+            text_embedding   = EXCLUDED.text_embedding,
+            image_embedding  = EXCLUDED.image_embedding,
+            metadata         = EXCLUDED.metadata,
+            indexed_at       = now(),
+            deleted_at       = NULL
+    `,
 		f.Path, f.Source, f.CanonicalPath,
 		f.ContentHash, f.Size, f.MimeType, f.Modality,
 		f.FileName, f.FileExt, f.FileCreatedAt, f.FileModifiedAt,
-		f.EmbedModel, embedding, f.ChunkIndex,
+		f.EmbedModel, textEmbedding, imageEmbedding, f.ChunkIndex,
 		f.Metadata,
 	)
 	if err != nil {
@@ -109,14 +115,16 @@ func UpsertDuplicate(ctx context.Context, conn *pgx.Conn, f File, canonicalPath 
 			path, source, canonical_path,
 			content_hash, size, mime_type, modality,
 			file_name, file_ext, file_created_at, file_modified_at,
-			embed_model, chunk_index, indexed_at, deleted_at
+			embed_model, text_embedding, image_embedding,
+			chunk_index, indexed_at, deleted_at
 		) VALUES (
 			$1, $2, $3,
 			$4, $5, $6, $7,
 			$8, $9, $10, $11,
-			$12, 0, now(), NULL
+			$12, NULL, NULL,
+			0, now(), NULL
 		)
-		ON CONFLICT (path, chunk_index) DO UPDATE SET
+		ON CONFLICT (path, chunk_index, embed_model) DO UPDATE SET
 			canonical_path   = EXCLUDED.canonical_path,
 			content_hash     = EXCLUDED.content_hash,
 			indexed_at       = now(),
