@@ -11,9 +11,9 @@ import (
 	"github.com/bjluckow/fsvector/internal/convert"
 	"github.com/bjluckow/fsvector/internal/embed"
 	"github.com/bjluckow/fsvector/internal/fsindex"
+	"github.com/bjluckow/fsvector/internal/fswatch"
 	"github.com/bjluckow/fsvector/internal/pipeline"
 	"github.com/bjluckow/fsvector/internal/store"
-	"github.com/bjluckow/fsvector/internal/watcher"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -81,11 +81,11 @@ func main() {
 	}
 	fmt.Println("fsvectord ready — watching for changes")
 
-	events := make(chan watcher.Event, 64)
+	events := make(chan fswatch.Event, 64)
 
 	go func() {
-		if err := watcher.Watch(ctx, cfg.WatchPath, events); err != nil {
-			fmt.Fprintf(os.Stderr, "watcher: %v\n", err)
+		if err := fswatch.Watch(ctx, cfg.WatchPath, events); err != nil {
+			fmt.Fprintf(os.Stderr, "fswatch: %v\n", err)
 			os.Exit(1)
 		}
 	}()
@@ -94,7 +94,7 @@ func main() {
 }
 
 // reconcile diffs the filesystem against the database and brings the DB
-// into sync. It runs once on startup before the fsnotify watcher takes over.
+// into sync. It runs once on startup before the fsnotify fswatch takes over.
 func reconcile(ctx context.Context, conn *pgx.Conn, pCfg pipeline.Config, watchPath string) error {
 	fmt.Printf("  reconciling %s\n", watchPath)
 
@@ -194,21 +194,21 @@ func reconcile(ctx context.Context, conn *pgx.Conn, pCfg pipeline.Config, watchP
 	return nil
 }
 
-func handleEvents(ctx context.Context, conn *pgx.Conn, pCfg pipeline.Config, events <-chan watcher.Event) {
+func handleEvents(ctx context.Context, conn *pgx.Conn, pCfg pipeline.Config, events <-chan fswatch.Event) {
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case e := <-events:
 			switch e.Kind {
-			case watcher.EventDelete:
+			case fswatch.EventDelete:
 				if err := store.SoftDelete(ctx, conn, e.Path); err != nil {
 					fmt.Fprintf(os.Stderr, "delete %s: %v\n", e.Path, err)
 				} else {
 					fmt.Printf("  deleted %s\n", e.Path)
 				}
 
-			case watcher.EventCreate, watcher.EventUpdate:
+			case fswatch.EventCreate, fswatch.EventUpdate:
 				fi, err := fsindex.FileInfoFromPath(e.Path)
 				if err != nil {
 					fmt.Fprintf(os.Stderr, "  stat %s: %v\n", e.Path, err)
