@@ -51,7 +51,8 @@ var imageExts = map[string]string{
 
 // Config holds the dependencies for the pipeline.
 type Config struct {
-	EmbedClient   *embed.Client
+	TextEmbed     *embed.TextClient
+	ImageEmbed    *embed.ImageClient
 	ConvertClient *convert.Client
 	EmbedModel    string
 	Source        string
@@ -126,7 +127,7 @@ func processText(ctx context.Context, cfg Config, fi fsindex.FileInfo, targetFmt
 	text = truncate(text, 4096)
 
 	// embed
-	vectors, err := cfg.EmbedClient.EmbedTexts(ctx, []string{text})
+	vectors, err := cfg.TextEmbed.EmbedTexts(ctx, []string{text})
 	if err != nil {
 		return Result{}, fmt.Errorf("embed text %s: %w", fi.Path, err)
 	}
@@ -168,7 +169,7 @@ func processImage(ctx context.Context, cfg Config, fi fsindex.FileInfo, targetFm
 	}
 
 	// embed as image
-	vector, err := cfg.EmbedClient.EmbedImage(ctx, fi.Name, data)
+	vector, err := cfg.ImageEmbed.EmbedImage(ctx, fi.Name, data)
 	if err != nil {
 		return Result{}, fmt.Errorf("embed image %s: %w", fi.Path, err)
 	}

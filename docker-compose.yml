@@ -15,21 +15,6 @@ services:
       timeout: 3s
       retries: 5
 
-  embedsvc:
-    build: services/embedsvc
-    environment:
-      EMBED_MODEL: ${EMBED_MODEL:-clip-ViT-B-32}
-    volumes:
-      - hf-cache:/root/.cache/huggingface
-    ports:
-      - "8100:8000"
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 5s
-      timeout: 3s
-      retries: 5 
-      start_period: 120s
-
   convertsvc:
     build: services/convertsvc
     ports:
@@ -39,6 +24,36 @@ services:
       interval: 5s
       timeout: 3s
       retries: 5
+
+  embedsvc-text:
+    build: services/embedsvc
+    environment:
+      EMBED_MODEL: ${TEXT_EMBED_MODEL:-sentence-transformers/all-MiniLM-L6-v2}
+    volumes:
+      - hf-cache:/root/.cache/huggingface
+    ports:
+      - "8100:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 120s
+
+  embedsvc-image:
+    build: services/embedsvc
+    environment:
+      EMBED_MODEL: ${IMAGE_EMBED_MODEL:-clip-ViT-B-32}
+    volumes:
+      - hf-cache:/root/.cache/huggingface
+    ports:
+      - "8200:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 120s
       
   fsvectord:
     build:
@@ -49,33 +64,23 @@ services:
       - ${SOURCE_DIR:-/tmp/fsvector-source}:/data/source:ro
     environment:
       DATABASE_URL: postgres://fsvector:fsvector@postgres:5432/fsvector
-      EMBEDSVC_URL: http://embedsvc:8000
+      TEXT_EMBEDSVC_URL: http://embedsvc-text:8000
+      IMAGE_EMBEDSVC_URL: http://embedsvc-image:8000
       CONVERTSVC_URL: http://convertsvc:8001
       WATCH_PATH: /data/source
-      EMBED_MODEL: ${EMBED_MODEL:-clip-ViT-B-32}
+      TEXT_EMBED_MODEL: ${TEXT_EMBED_MODEL:-sentence-transformers/all-MiniLM-L6-v2}
+      IMAGE_EMBED_MODEL: ${IMAGE_EMBED_MODEL:-clip-ViT-B-32}
       SOURCE: ${SOURCE:-local}
     depends_on:
       postgres:
         condition: service_healthy
-      embedsvc:
-        condition: service_healthy
       convertsvc:
         condition: service_healthy
-    restart: unless-stopped
-
-  fsvector:
-    build:
-      context: .
-      dockerfile: docker/Dockerfile
-      target: fsvector
-    environment:
-      DATABASE_URL: postgres://fsvector:fsvector@postgres:5432/fsvector
-      EMBEDSVC_URL: http://embedsvc:8000
-    depends_on:
-      postgres:
+      embedsvc-text:
         condition: service_healthy
-    profiles:
-      - cli
+      embedsvc-image:
+        condition: service_healthy
+    restart: unless-stopped
 
 volumes:
   pgdata:

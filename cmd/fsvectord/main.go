@@ -30,8 +30,9 @@ func main() {
 	fmt.Println("fsvectord starting")
 
 	// ── connect to embedsvc, get dimension ───────────────────────────────────
-	embedClient := embed.NewClient(cfg.EmbedSvcURL)
-	health, err := embedClient.Health(ctx)
+	textEmbed := embed.NewTextClient(cfg.EmbedSvcURL)   // temporary stub — M1.2.5 splits these
+	imageEmbed := embed.NewImageClient(cfg.EmbedSvcURL) // temporary stub — M1.2.5 splits these
+	health, err := imageEmbed.Health(ctx)               // use image health as proxy for now
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "fsvectord: embedsvc unreachable: %v\n", err)
 		os.Exit(1)
@@ -67,7 +68,8 @@ func main() {
 	// ── reconcile ─────────────────────────────────────────────────────────────
 	convertClient := convert.NewClient(cfg.ConvertSvcURL)
 	pCfg := pipeline.Config{
-		EmbedClient:   embedClient,
+		TextEmbed:     textEmbed,
+		ImageEmbed:    imageEmbed,
 		ConvertClient: convertClient,
 		EmbedModel:    health.Model,
 		Source:        cfg.Source,
