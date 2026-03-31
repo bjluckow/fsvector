@@ -153,16 +153,19 @@ var searchCmd = &cobra.Command{
 			return err
 		}
 
+		// normalize scores within each modality
+		results = search.Normalize(results)
+
 		if len(results) == 0 {
 			fmt.Println("no results")
 			return nil
 		}
 
 		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(w, "SCORE\tMODALITY\tEXT\tSIZE\tPATH")
+		fmt.Fprintln(w, "SCORE\tNORM\tMODALITY\tEXT\tSIZE\tPATH")
 		for _, r := range results {
-			fmt.Fprintf(w, "%.4f\t%s\t%s\t%s\t%s\n",
-				r.Score, r.Modality, r.FileExt, fmtSize(r.Size), r.Path)
+			fmt.Fprintf(w, "%.4f\t%.4f\t%s\t%s\t%s\t%s\n",
+				r.Score, r.NormScore, r.Modality, r.FileExt, fmtSize(r.Size), r.Path)
 		}
 		w.Flush()
 		return nil
