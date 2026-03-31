@@ -40,7 +40,7 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("DATABASE_URL is required")
 	}
 
-	minEmbedSizeStr := env("MIN_EMBED_SIZE", "100b")
+	minEmbedSizeStr := env("MIN_EMBED_SIZE", "100")
 	minEmbedSize, err := parse.Size(minEmbedSizeStr)
 	if err != nil {
 		return nil, fmt.Errorf("MIN_EMBED_SIZE: %w", err)

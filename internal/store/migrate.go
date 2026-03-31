@@ -2,9 +2,10 @@ package store
 
 import (
 	"context"
-	_ "embed"
 	"fmt"
 	"strings"
+
+	_ "embed"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -12,34 +13,102 @@ import (
 //go:embed sql/schema.sql
 var schemaTmpl string
 
-// Migrate applies the schema to the database, substituting the embedding
-// dimension. It is idempotent — safe to call on every startup.
+// Migrate applies all pending schema migrations in order.
+// Safe to call on every startup — already-applied migrations are skipped.
 func Migrate(ctx context.Context, conn *pgx.Conn, dim int) error {
-	schema := strings.ReplaceAll(schemaTmpl, "%%EMBEDDING_DIM%%", fmt.Sprintf("%d", dim))
-	_, err := conn.Exec(ctx, schema)
-	if err != nil {
-		return fmt.Errorf("migrate: %w", err)
+	if err := ensureVersionTable(ctx, conn); err != nil {
+		return err
 	}
+
+	version, err := currentVersion(ctx, conn)
+	if err != nil {
+		return err
+	}
+
+	migrations := []struct {
+		version int
+		fn      func(context.Context, *pgx.Conn, int) error
+	}{
+		{1, migrateV1},
+		{2, migrateV2},
+	}
+
+	for _, m := range migrations {
+		if version >= m.version {
+			continue
+		}
+		fmt.Printf("  applying schema migration v%d\n", m.version)
+		if err := m.fn(ctx, conn, dim); err != nil {
+			return fmt.Errorf("migration v%d: %w", m.version, err)
+		}
+		if err := recordVersion(ctx, conn, m.version); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 
-// EmbeddingDim returns the current vector dimension of the files table,
-// or 0 if the table does not exist yet.
-func EmbeddingDim(ctx context.Context, conn *pgx.Conn) (int, error) {
-	var dim int
-	err := conn.QueryRow(ctx, `
-		SELECT atttypmod
-		FROM pg_attribute
-		WHERE attrelid = 'files'::regclass
-		  AND attname = 'embedding'
-	`).Scan(&dim)
+func ensureVersionTable(ctx context.Context, conn *pgx.Conn) error {
+	_, err := conn.Exec(ctx, `
+		CREATE TABLE IF NOT EXISTS schema_version (
+			version     INT NOT NULL,
+			applied_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+		)
+	`)
+	return err
+}
 
-	if err == pgx.ErrNoRows {
-		return 0, nil
-	}
-	if err != nil {
-		// table doesn't exist yet
-		return 0, nil
-	}
-	return dim, nil
+func currentVersion(ctx context.Context, conn *pgx.Conn) (int, error) {
+	var version int
+	err := conn.QueryRow(ctx, `
+		SELECT COALESCE(MAX(version), 0) FROM schema_version
+	`).Scan(&version)
+	return version, err
+}
+
+func recordVersion(ctx context.Context, conn *pgx.Conn, version int) error {
+	_, err := conn.Exec(ctx,
+		`INSERT INTO schema_version (version) VALUES ($1)`, version)
+	return err
+}
+
+// migrateV1 applies the initial schema.
+func migrateV1(ctx context.Context, conn *pgx.Conn, dim int) error {
+	schema := strings.ReplaceAll(schemaTmpl, "%%EMBEDDING_DIM%%", fmt.Sprintf("%d", dim))
+	_, err := conn.Exec(ctx, schema)
+	return err
+}
+
+// migrateV2 applies v1.2 changes:
+// - adds retired_at column to files
+// - replaces (path, chunk_index) unique index with (path, chunk_index, embed_model)
+// - creates models table and its unique index
+func migrateV2(ctx context.Context, conn *pgx.Conn, _ int) error {
+	_, err := conn.Exec(ctx, `
+		ALTER TABLE files
+			ADD COLUMN IF NOT EXISTS retired_at TIMESTAMPTZ;
+
+		DROP INDEX IF EXISTS files_path_chunk_idx;
+
+		CREATE UNIQUE INDEX IF NOT EXISTS files_path_chunk_model_idx
+			ON files (path, chunk_index, embed_model);
+
+		CREATE TABLE IF NOT EXISTS models (
+			modality    TEXT NOT NULL,
+			model_name  TEXT NOT NULL,
+			dim         INT NOT NULL,
+			status      TEXT NOT NULL DEFAULT 'ready',
+			is_active   BOOLEAN NOT NULL DEFAULT false,
+			indexed_at  TIMESTAMPTZ,
+			created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+			updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+			PRIMARY KEY (modality, model_name)
+		);
+
+		CREATE UNIQUE INDEX IF NOT EXISTS models_active_modality_idx
+			ON models (modality)
+			WHERE is_active = true;
+	`)
+	return err
 }

@@ -46,26 +46,23 @@ func main() {
 	}
 	defer conn.Close(ctx)
 
-	// ── check for dimension mismatch ──────────────────────────────────────────
-	existingDim, err := store.EmbeddingDim(ctx, conn)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "fsvectord: dim check: %v\n", err)
-		os.Exit(1)
-	}
-	if existingDim != 0 && existingDim != health.Dim {
-		fmt.Fprintf(os.Stderr,
-			"fsvectord: embedding dimension mismatch\n  database has vector(%d), embedsvc returns dim=%d\n  to re-index: docker compose down -v && docker compose up\n",
-			existingDim, health.Dim,
-		)
-		os.Exit(1)
-	}
-
 	// ── migrate ───────────────────────────────────────────────────────────────
 	if err := store.Migrate(ctx, conn, health.Dim); err != nil {
 		fmt.Fprintf(os.Stderr, "fsvectord: migrate: %v\n", err)
 		os.Exit(1)
 	}
 	fmt.Println("  schema ok")
+
+	// ── register model ────────────────────────────────────────────────────────
+	if err := store.RegisterModel(ctx, conn, "text", health.Model, health.Dim); err != nil {
+		fmt.Fprintf(os.Stderr, "fsvectord: register model: %v\n", err)
+		os.Exit(1)
+	}
+	if err := store.RegisterModel(ctx, conn, "image", health.Model, health.Dim); err != nil {
+		fmt.Fprintf(os.Stderr, "fsvectord: register model: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("  registered model: %s (image)\n", health.Model)
 
 	// ── reconcile ─────────────────────────────────────────────────────────────
 	convertClient := convert.NewClient(cfg.ConvertSvcURL)

@@ -51,7 +51,7 @@ func Upsert(ctx context.Context, conn *pgx.Conn, f File) error {
 			$12, $13, $14,
 			$15, now(), NULL
 		)
-		ON CONFLICT (path, chunk_index) DO UPDATE SET
+		ON CONFLICT (path, chunk_index, embed_model) DO UPDATE SET
 			source           = EXCLUDED.source,
 			canonical_path   = EXCLUDED.canonical_path,
 			content_hash     = EXCLUDED.content_hash,
