@@ -55,6 +55,7 @@ type Config struct {
 	ConvertClient *convert.Client
 	EmbedModel    string
 	Source        string
+	MinEmbedSize  int64
 }
 
 // Result is returned after a file has been processed.
@@ -68,6 +69,14 @@ type Result struct {
 // detect modality → convert → embed → return store.File ready for upsert.
 func Process(ctx context.Context, cfg Config, fi fsindex.FileInfo) (Result, error) {
 	ext := strings.ToLower(fi.Ext)
+
+	// skip files that are too small to be worth embedding
+	if fi.Size < cfg.MinEmbedSize {
+		return Result{
+			Skipped:    true,
+			SkipReason: fmt.Sprintf("file too small (< %d bytes)", cfg.MinEmbedSize),
+		}, nil
+	}
 
 	// detect modality
 	if targetFmt, ok := textExts[ext]; ok {

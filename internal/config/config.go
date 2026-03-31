@@ -3,6 +3,8 @@ package config
 import (
 	"fmt"
 	"os"
+
+	"github.com/bjluckow/fsvector/pkg/parse"
 )
 
 // Config holds all runtime configuration shared across binaries.
@@ -16,9 +18,10 @@ type Config struct {
 	ConvertSvcURL string
 
 	// Daemon
-	WatchPath  string
-	EmbedModel string
-	Source     string // "local" or "s3://bucket/prefix"
+	WatchPath    string
+	EmbedModel   string
+	Source       string // "local" or "s3://bucket/prefix"
+	MinEmbedSize int64
 }
 
 // Load reads configuration from environment variables.
@@ -36,6 +39,13 @@ func Load() (*Config, error) {
 	if c.DatabaseURL == "" {
 		return nil, fmt.Errorf("DATABASE_URL is required")
 	}
+
+	minEmbedSizeStr := env("MIN_EMBED_SIZE", "100b")
+	minEmbedSize, err := parse.Size(minEmbedSizeStr)
+	if err != nil {
+		return nil, fmt.Errorf("MIN_EMBED_SIZE: %w", err)
+	}
+	c.MinEmbedSize = minEmbedSize
 
 	return c, nil
 }

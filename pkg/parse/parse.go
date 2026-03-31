@@ -67,8 +67,8 @@ func Size(s string) (int64, error) {
 	}
 
 	for _, m := range multipliers {
-		if strings.HasSuffix(lower, m.suffix) {
-			numStr := strings.TrimSuffix(lower, m.suffix)
+		numStr, found := strings.CutSuffix(lower, m.suffix)
+		if found {
 			n, err := strconv.ParseFloat(strings.TrimSpace(numStr), 64)
 			if err != nil || n < 0 {
 				return 0, fmt.Errorf("invalid size %q", s)

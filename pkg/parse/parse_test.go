@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/bjluckow/fsvector/internal/parse"
+	"github.com/bjluckow/fsvector/pkg/parse"
 )
 
 func TestSince_Relative(t *testing.T) {

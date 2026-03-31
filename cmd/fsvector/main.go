@@ -9,8 +9,8 @@ import (
 
 	"github.com/bjluckow/fsvector/internal/config"
 	"github.com/bjluckow/fsvector/internal/embed"
-	"github.com/bjluckow/fsvector/internal/parse"
 	"github.com/bjluckow/fsvector/internal/search"
+	"github.com/bjluckow/fsvector/pkg/parse"
 	"github.com/jackc/pgx/v5"
 	"github.com/spf13/cobra"
 )
