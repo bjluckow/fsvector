@@ -64,17 +64,6 @@ func main() {
 	}
 	fmt.Println("  schema ok")
 
-	// ── register model ────────────────────────────────────────────────────────
-	if err := store.RegisterModel(ctx, conn, "text", textHealth.Model, textHealth.Dim); err != nil {
-		fmt.Fprintf(os.Stderr, "fsvectord: register text model: %v\n", err)
-		os.Exit(1)
-	}
-	if err := store.RegisterModel(ctx, conn, "image", imageHealth.Model, imageHealth.Dim); err != nil {
-		fmt.Fprintf(os.Stderr, "fsvectord: register image model: %v\n", err)
-		os.Exit(1)
-	}
-	fmt.Printf("  schema ok\n")
-
 	// ── reconcile ─────────────────────────────────────────────────────────────
 	pCfg := pipeline.Config{
 		TextEmbed:       textEmbed,
