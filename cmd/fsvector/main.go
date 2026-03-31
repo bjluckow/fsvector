@@ -9,7 +9,8 @@ import (
 
 	"github.com/bjluckow/fsvector/internal/config"
 	"github.com/bjluckow/fsvector/internal/embed"
-	"github.com/bjluckow/fsvector/internal/store"
+	"github.com/bjluckow/fsvector/internal/search"
+	"github.com/bjluckow/fsvector/pkg/parse"
 	"github.com/jackc/pgx/v5"
 	"github.com/spf13/cobra"
 )
@@ -72,7 +73,18 @@ func fmtTime(t *time.Time) string {
 
 // ── search ────────────────────────────────────────────────────────────────────
 
-var searchLimit int
+var (
+	searchLimit    int
+	searchPage     int
+	searchModality string
+	searchExt      string
+	searchSource   string
+	searchSince    string
+	searchBefore   string
+	searchMinSize  string
+	searchMaxSize  string
+	searchMinScore float64
+)
 
 var searchCmd = &cobra.Command{
 	Use:   "search <query>",
@@ -89,10 +101,60 @@ var searchCmd = &cobra.Command{
 			return fmt.Errorf("embed query: %w", err)
 		}
 
-		results, err := store.Search(ctx, conn, vectors[0], searchLimit)
+		q := search.SearchQuery{
+			Vector: vectors[0],
+			Limit:  searchLimit,
+			Offset: (searchPage - 1) * searchLimit,
+		}
+
+		if searchModality != "" {
+			q.Modality = searchModality
+		}
+		if searchExt != "" {
+			q.Ext = searchExt
+		}
+		if searchSource != "" {
+			q.Source = searchSource
+		}
+		if searchSince != "" {
+			t, err := parse.Since(searchSince)
+			if err != nil {
+				return fmt.Errorf("--since: %w", err)
+			}
+			q.Since = &t
+		}
+		if searchBefore != "" {
+			t, err := parse.Since(searchBefore)
+			if err != nil {
+				return fmt.Errorf("--before: %w", err)
+			}
+			q.Before = &t
+		}
+		if searchMinSize != "" {
+			n, err := parse.Size(searchMinSize)
+			if err != nil {
+				return fmt.Errorf("--min-size: %w", err)
+			}
+			q.MinSize = &n
+		}
+		if searchMaxSize != "" {
+			n, err := parse.Size(searchMaxSize)
+			if err != nil {
+				return fmt.Errorf("--max-size: %w", err)
+			}
+			q.MaxSize = &n
+		}
+		if cmd.Flags().Changed("min-score") {
+			q.MinScore = &searchMinScore
+		}
+
+		results, err := search.Search(ctx, conn, q)
 		if err != nil {
 			return err
 		}
+
+		// normalize scores within each modality
+		results = search.Normalize(results)
 
 		if len(results) == 0 {
 			fmt.Println("no results")
@@ -100,10 +162,10 @@ var searchCmd = &cobra.Command{
 		}
 
 		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(w, "SCORE\tMODALITY\tSIZE\tPATH")
+		fmt.Fprintln(w, "SCORE\tNORM\tMODALITY\tEXT\tSIZE\tPATH")
 		for _, r := range results {
-			fmt.Fprintf(w, "%.4f\t%s\t%s\t%s\n",
-				r.Score, r.Modality, fmtSize(r.Size), r.Path)
+			fmt.Fprintf(w, "%.4f\t%.4f\t%s\t%s\t%s\t%s\n",
+				r.Score, r.NormScore, r.Modality, r.FileExt, fmtSize(r.Size), r.Path)
 		}
 		w.Flush()
 		return nil
@@ -112,11 +174,29 @@ var searchCmd = &cobra.Command{
 
 func init() {
 	searchCmd.Flags().IntVarP(&searchLimit, "limit", "n", 10, "number of results")
+	searchCmd.Flags().IntVarP(&searchPage, "page", "p", 1, "page number")
+	searchCmd.Flags().StringVarP(&searchModality, "modality", "m", "", "filter by modality: text, image")
+	searchCmd.Flags().StringVar(&searchExt, "ext", "", "filter by file extension e.g. pdf")
+	searchCmd.Flags().StringVar(&searchSource, "source", "", "filter by source: local, s3://...")
+	searchCmd.Flags().StringVar(&searchSince, "since", "", "modified after: 7d, 30d, 2024-01-01")
+	searchCmd.Flags().StringVar(&searchBefore, "before", "", "modified before: 2024-01-01")
+	searchCmd.Flags().StringVar(&searchMinSize, "min-size", "", "minimum file size: 10kb, 5mb")
+	searchCmd.Flags().StringVar(&searchMaxSize, "max-size", "", "maximum file size: 10mb, 1gb")
+	searchCmd.Flags().Float64Var(&searchMinScore, "min-score", 0, "exclude results below this score")
 }
 
 // ── ls ────────────────────────────────────────────────────────────────────────
 
-var lsDeleted bool
+var (
+	lsDeleted  bool
+	lsLimit    int
+	lsPage     int
+	lsModality string
+	lsExt      string
+	lsSource   string
+	lsSince    string
+	lsBefore   string
+)
 
 var lsCmd = &cobra.Command{
 	Use:   "ls",
@@ -126,7 +206,37 @@ var lsCmd = &cobra.Command{
 		conn, _ := mustConnect()
 		defer conn.Close(ctx)
 
-		files, err := store.Ls(ctx, conn, lsDeleted)
+		q := search.ListQuery{
+			Limit:          lsLimit,
+			Offset:         (lsPage - 1) * lsLimit,
+			IncludeDeleted: lsDeleted,
+		}
+
+		if lsModality != "" {
+			q.Modality = lsModality
+		}
+		if lsExt != "" {
+			q.Ext = lsExt
+		}
+		if lsSource != "" {
+			q.Source = lsSource
+		}
+		if lsSince != "" {
+			t, err := parse.Since(lsSince)
+			if err != nil {
+				return fmt.Errorf("--since: %w", err)
+			}
+			q.Since = &t
+		}
+		if lsBefore != "" {
+			t, err := parse.Since(lsBefore)
+			if err != nil {
+				return fmt.Errorf("--before: %w", err)
+			}
+			q.Before = &t
+		}
+
+		files, err := search.List(ctx, conn, q)
 		if err != nil {
 			return err
 		}
@@ -158,6 +268,13 @@ var lsCmd = &cobra.Command{
 
 func init() {
 	lsCmd.Flags().BoolVar(&lsDeleted, "deleted", false, "include soft-deleted files")
+	lsCmd.Flags().IntVarP(&lsLimit, "limit", "n", 100, "number of results")
+	lsCmd.Flags().IntVarP(&lsPage, "page", "p", 1, "page number")
+	lsCmd.Flags().StringVarP(&lsModality, "modality", "m", "", "filter by modality: text, image")
+	lsCmd.Flags().StringVar(&lsExt, "ext", "", "filter by file extension")
+	lsCmd.Flags().StringVar(&lsSource, "source", "", "filter by source")
+	lsCmd.Flags().StringVar(&lsSince, "since", "", "modified after: 7d, 30d, 2024-01-01")
+	lsCmd.Flags().StringVar(&lsBefore, "before", "", "modified before: 2024-01-01")
 }
 
 // ── show ──────────────────────────────────────────────────────────────────────
@@ -171,7 +288,7 @@ var showCmd = &cobra.Command{
 		conn, _ := mustConnect()
 		defer conn.Close(ctx)
 
-		f, err := store.Show(ctx, conn, args[0])
+		f, err := search.Show(ctx, conn, args[0])
 		if err != nil {
 			return err
 		}
@@ -207,7 +324,7 @@ var statsCmd = &cobra.Command{
 		conn, _ := mustConnect()
 		defer conn.Close(ctx)
 
-		s, err := store.GetStats(ctx, conn)
+		s, err := search.GetStats(ctx, conn)
 		if err != nil {
 			return err
 		}
