@@ -3,6 +3,10 @@
 A local-first tool for applying vector embeddings to file system directories,
 enabling semantic search and classification of unstructured files. Embedding models are hot-swappable, making it easy to test and compare results locally.
 
+## Author's Note
+
+Hi, this is [Ben](https://www.benjaminluckow.com), the owner of this repo and as far as I'm aware, not an AI agent. This project was created for and driven by a real-world use case with lots of multimodal data and strict time constraints. As such, AI tools were used to expedite code generation and solo design iteration. Rest assured that all committed code has been thoroughly reviewed and tested, all design choices directed, and all flaws curiously invented, by me - a human. 
+
 ## Overview
 
 `fsvectord` watches a directory, converts and embeds its contents, and stores
