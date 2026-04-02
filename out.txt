@@ -1,0 +1,112 @@
+BENJAMIN LUCKOW
+bjluckow1@gmail.com • (631) 800-4589 • linkedin.com/in/benjaminluckow
+EDUCATION
+Cornell University​ ​
+​
+​
+​
+​
+​
+​
+​
+Graduated May 2024
+B.S., Computer Science​
+​
+​
+​
+​
+​
+Minors in Operations Research Engineering, Engineering Business
+Coursework • System Design/Modeling, Functional Programming, Linear Optimization, ML/AI
+Skills • Java, TypeScript, Python, Go, React, Spring Boot, Next.js, SQL/DBMS, Docker, MS Excel
+EXPERIENCE AND LEADERSHIP
+adMarketplace Inc.​ ​
+​
+​
+​
+​
+​
+June 2025 – Present
+Software Engineering Intern​ ​
+​
+​
+​
+​
+New York, NY (On-Site)
+●​ Led multidisciplinary team in rapidly prototyping agentic website chat experience with drop-in
+MCP user intent tools using Next.js + OpenAI SDKs + Spring AI and presented live demo to CEO
+●​ Built cross-cutting Spring AI services for analyzing real-time production/infrastructure data from
+Databricks and Datadog, improving observability and accelerating data delivery by up to 60x
+●​ Assisted senior engineers in refining, deploying Python vector search microservices to Kubernetes
+Understory Technologies​ ​
+​
+​
+​
+​
+May 2023 – August 2023
+Software Engineering Intern​ ​
+​
+​
+​
+​
+New York, NY (Hybrid)
+●​ Migrated core backend TypeScript services by identifying, modularizing, and unit-testing crucial
+dependencies to ensure a seamless and robust transition between vendor libraries
+●​ Collaborated directly with lead engineers in Agile environment to implement client-facing output
+validation algorithms, enhancing overall product robustness and majorly easing CI testing process
+More Perfect Union/Melvoin for LAUSD/Suozzi for NY​
+​
+February 2022 – October 2022
+Freelance Software Developer, Data Scientist​
+​
+​
+​
+Los Angeles, CA (Remote)
+●​ Consulted for candidates and managers across various political campaigns to deliver affordable
+intelligence solutions using Python and SQLite to automate 100+ hours of news media research
+●​ Crafted data-driven donor presentations, social media posts, and visualized financial and voter data
+using Excel, Seaborn, and Tableau to reach 50,000+ voters and secure key support
+Cornell Student Assembly​ ​
+​
+​
+​​
+November 2021 – January 2023
+Representative At-Large​
+​
+​
+​
+​
+​ ​
+​
+​
+Ithaca, NY
+●​ Oversaw allocation of $9,000,000+ in funding to university organizations on finance committee
+●​ Elevated and presented student-led campus engineering projects for assembly approval
+Cornell Equity Research ​ ​
+​
+​
+​
+February 2022 – January 2023
+Lead Tech Analyst ​ ​
+​
+​
+​
+​
+​
+​
+​
+​
+Ithaca, NY
+●​ Managed 12 analysts in building, editing, and fine-tuning tech and telecoms company valuations
+and realtime API-driven quantitative models, ultimately overseeing 20% of all publication content
+PROJECTS
+Semantic Search Engine & Datamining Pipeline​ ​
+​
+​
+September 2023 – Present
+●​ Iteratively developed several projects in Python, Go, and TypeScript to scalably and reliably
+process arbitrary website data built around asynchronous job pipelines for large-scale datamining
+●​ Deployed RPC-based remote browser agents to identify valuable backend APIs in network traffic
+●​ Designed reactive UI dashboards for crawler management and data observability using Next.js
+
+
