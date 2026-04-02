@@ -74,8 +74,16 @@ func processText(ctx context.Context, cfg Config, fi fsindex.FileInfo) (Result, 
 	}
 
 	var text string
-	if target := ConvertTarget(fi.Ext); target != "" {
-		converted, err := cfg.ConvertClient.Convert(ctx, fi.Name, data, target)
+	plainExts := map[string]bool{
+		"txt": true, "md": true, "go": true, "py": true,
+		"js": true, "ts": true, "css": true, "json": true,
+		"yaml": true, "yml": true, "toml": true, "sh": true,
+		"rs": true, "c": true, "cpp": true, "h": true,
+		"java": true, "rb": true, "html": true, "htm": true,
+	}
+
+	if !plainExts[fi.Ext] {
+		converted, err := cfg.ConvertClient.ConvertToText(ctx, fi.Name, data)
 		if err != nil {
 			return Result{}, fmt.Errorf("convert %s: %w", fi.Path, err)
 		}
@@ -148,8 +156,8 @@ func processImage(ctx context.Context, cfg Config, fi fsindex.FileInfo) (Result,
 		return Result{}, fmt.Errorf("read %s: %w", fi.Path, err)
 	}
 
-	if target := ConvertTarget(fi.Ext); target != "" {
-		data, err = cfg.ConvertClient.Convert(ctx, fi.Name, data, target)
+	if fi.Ext != "jpg" && fi.Ext != "jpeg" {
+		data, err = cfg.ConvertClient.ConvertToImage(ctx, fi.Name, data)
 		if err != nil {
 			return Result{}, fmt.Errorf("convert image %s: %w", fi.Path, err)
 		}
