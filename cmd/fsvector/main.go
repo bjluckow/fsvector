@@ -335,6 +335,7 @@ var statsCmd = &cobra.Command{
 		fmt.Printf("text         %d\n", s.TextFiles)
 		fmt.Printf("image        %d\n", s.ImageFiles)
 		fmt.Printf("audio        %d\n", s.AudioFiles)
+		fmt.Printf("video        %d\n", s.VideoFiles)
 		fmt.Printf("deleted      %d\n", s.DeletedFiles)
 		fmt.Printf("duplicates   %d\n", s.Duplicates)
 		return nil
