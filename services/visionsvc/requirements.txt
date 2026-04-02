@@ -1,0 +1,7 @@
+fastapi
+uvicorn
+python-multipart
+pillow
+pytesseract
+transformers
+torch --index-url https://download.pytorch.org/whl/cpu

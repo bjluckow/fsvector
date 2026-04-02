@@ -56,6 +56,23 @@ services:
       timeout: 5s
       retries: 10
       start_period: 60s
+
+  visionsvc:
+    build: services/visionsvc
+    environment:
+      CAPTION_MODEL: ${CAPTION_MODEL:-Salesforce/blip-image-captioning-base}
+      VISION_OCR_ENABLED: ${VISION_OCR_ENABLED:-true}
+      TRANSFORMERS_OFFLINE: "0"
+    volumes:
+      - vision-cache:/root/.cache/huggingface
+    ports:
+      - "8003:8003"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8003/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 120s
       
   fsvectord:
     build:
@@ -86,3 +103,4 @@ volumes:
   pgdata:
   hf-cache:
   whisper-cache:
+  vision-cache:
