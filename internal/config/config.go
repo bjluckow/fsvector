@@ -39,7 +39,7 @@ func Load() (*Config, error) {
 		DatabaseURL:      env("DATABASE_URL", ""),
 		ChunkSize:        envInt("CHUNK_SIZE", 1000),
 		ChunkOverlap:     envInt("CHUNK_OVERLAP", 100),
-		MinChunkSize:     envInt("MIN_CHUNK_SIZE", 100),
+		MinChunkSize:     envInt("MIN_CHUNK_SIZE", 10), // TODO: may not need this with hybrid search
 		EmbedSvcURL:      env("EMBEDSVC_URL", "http://embedsvc:8000"),
 		ConvertSvcURL:    env("CONVERTSVC_URL", "http://convertd:8001"),
 		TranscribeSvcURL: env("TRANSCRIBESVC_URL", "http://transcribesvc:8002"),
