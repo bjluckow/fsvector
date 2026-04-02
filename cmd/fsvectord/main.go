@@ -7,14 +7,14 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/bjluckow/fsvector/internal/clients/convert"
+	"github.com/bjluckow/fsvector/internal/clients/embed"
+	"github.com/bjluckow/fsvector/internal/clients/transcribe"
 	"github.com/bjluckow/fsvector/internal/config"
-	"github.com/bjluckow/fsvector/internal/convert"
-	"github.com/bjluckow/fsvector/internal/embed"
 	"github.com/bjluckow/fsvector/internal/fsindex"
 	"github.com/bjluckow/fsvector/internal/fswatch"
 	"github.com/bjluckow/fsvector/internal/pipeline"
 	"github.com/bjluckow/fsvector/internal/store"
-	"github.com/bjluckow/fsvector/internal/transcribe"
 	"github.com/jackc/pgx/v5"
 )
 

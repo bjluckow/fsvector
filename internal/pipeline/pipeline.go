@@ -7,11 +7,11 @@ import (
 	"strings"
 
 	"github.com/bjluckow/fsvector/internal/chunk"
-	"github.com/bjluckow/fsvector/internal/convert"
-	"github.com/bjluckow/fsvector/internal/embed"
+	"github.com/bjluckow/fsvector/internal/clients/convert"
+	"github.com/bjluckow/fsvector/internal/clients/embed"
+	"github.com/bjluckow/fsvector/internal/clients/transcribe"
 	"github.com/bjluckow/fsvector/internal/fsindex"
 	"github.com/bjluckow/fsvector/internal/store"
-	"github.com/bjluckow/fsvector/internal/transcribe"
 )
 
 // Config holds the dependencies for the pipeline.
