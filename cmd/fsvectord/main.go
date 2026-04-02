@@ -14,6 +14,7 @@ import (
 	"github.com/bjluckow/fsvector/internal/fswatch"
 	"github.com/bjluckow/fsvector/internal/pipeline"
 	"github.com/bjluckow/fsvector/internal/store"
+	"github.com/bjluckow/fsvector/internal/transcribe"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -29,7 +30,7 @@ func main() {
 
 	fmt.Println("fsvectord starting")
 
-	// ── connect to embedsvc, get dimension ───────────────────────────────────
+	// ── connect to services ───────────────────────────────────
 	embedClient := embed.NewClient(cfg.EmbedSvcURL)
 	health, err := embedClient.Health(ctx)
 	if err != nil {
@@ -37,6 +38,22 @@ func main() {
 		os.Exit(1)
 	}
 	fmt.Printf("  embed model: %s (dim=%d)\n", health.Model, health.Dim)
+
+	convertClient := convert.NewClient(cfg.ConvertSvcURL)
+	convertHealth, err := convertClient.Health(ctx)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "fsvectord: convertsvc unreachable: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("  convert backends: %v\n", convertHealth.Backends)
+
+	transcribeClient := transcribe.NewClient(cfg.TranscribeSvcURL)
+	transcribeHealth, err := transcribeClient.Health(ctx)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "fsvectord: transcribesvc unreachable: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("  transcribe model: %s\n", transcribeHealth.Model)
 
 	// ── connect to postgres ───────────────────────────────────────────────────
 	conn, err := pgx.Connect(ctx, cfg.DatabaseURL)
@@ -68,16 +85,16 @@ func main() {
 	fmt.Println("  schema ok")
 
 	// ── reconcile ─────────────────────────────────────────────────────────────
-	convertClient := convert.NewClient(cfg.ConvertSvcURL)
 	pCfg := pipeline.Config{
-		EmbedClient:   embedClient,
-		ConvertClient: convertClient,
-		EmbedModel:    health.Model,
-		Source:        cfg.Source,
-		MinEmbedSize:  cfg.MinEmbedSize,
-		ChunkSize:     cfg.ChunkSize,
-		ChunkOverlap:  cfg.ChunkOverlap,
-		MinChunkSize:  cfg.MinChunkSize,
+		EmbedClient:      embedClient,
+		ConvertClient:    convertClient,
+		TranscribeClient: transcribeClient,
+		EmbedModel:       health.Model,
+		Source:           cfg.Source,
+		MinEmbedSize:     cfg.MinEmbedSize,
+		ChunkSize:        cfg.ChunkSize,
+		ChunkOverlap:     cfg.ChunkOverlap,
+		MinChunkSize:     cfg.MinChunkSize,
 	}
 
 	if err := reconcile(ctx, conn, pCfg, cfg.WatchPath); err != nil {

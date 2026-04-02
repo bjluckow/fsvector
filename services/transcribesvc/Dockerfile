@@ -2,22 +2,16 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# install system dependencies
 RUN apt-get update && apt-get install -y \
-    imagemagick \
-    pandoc \
-    poppler-utils \
-    libmagic1 \
     ffmpeg \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# install python dependencies
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY main.py .
 
-EXPOSE 8001
+EXPOSE 8002
 
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8001"]
+CMD ["python", "-m","uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8002"]

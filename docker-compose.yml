@@ -19,6 +19,8 @@ services:
     build: services/embedsvc
     environment:
       EMBED_MODEL: ${EMBED_MODEL:-clip-ViT-B-32}
+      TRANSFORMERS_OFFLINE: "1"
+      HF_DATASETS_OFFLINE: "1"
     volumes:
       - hf-cache:/root/.cache/huggingface
     ports:
@@ -39,6 +41,21 @@ services:
       interval: 5s
       timeout: 3s
       retries: 5
+
+  transcribesvc:
+    build: services/transcribesvc
+    environment:
+      WHISPER_MODEL: ${WHISPER_MODEL:-base.en}
+    volumes:
+      - whisper-cache:/root/.cache/whisper
+    ports:
+      - "8002:8002"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8002/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
       
   fsvectord:
     build:
@@ -61,8 +78,11 @@ services:
         condition: service_healthy
       convertsvc:
         condition: service_healthy
+      transcribesvc:
+        condition: service_healthy
     restart: unless-stopped
 
 volumes:
   pgdata:
   hf-cache:
+  whisper-cache:

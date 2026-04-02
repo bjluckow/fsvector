@@ -46,6 +46,12 @@ var fileTypes = map[string]fileType{
 	"tif":  {"image", "jpeg"},
 	"heic": {"image", "jpeg"},
 	"heif": {"image", "jpeg"},
+	// audio — needs normalization
+	"mp3": {"audio", ""},
+	"m4a": {"audio", ""},
+	"wav": {"audio", ""},
+	"aac": {"audio", ""},
+	"ogg": {"audio", ""},
 }
 
 // Modality returns the modality for a given file extension

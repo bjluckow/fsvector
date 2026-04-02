@@ -13,6 +13,7 @@ app = FastAPI()
 # formats we can convert to a common type for embedding
 TEXT_FORMATS = {"pdf", "docx", "doc", "odt", "rtf", "html", "htm", "md", "txt"}
 IMAGE_FORMATS = {"heic", "heif", "webp", "png", "gif", "bmp", "tiff", "tif", "jpg", "jpeg"}
+AUDIO_FORMATS = {"mp3", "m4a", "wav", "aac", "ogg"}
 
 def ext(filename: str) -> str:
     return Path(filename).suffix.lstrip(".").lower()
@@ -29,6 +30,11 @@ def health():
     try:
         subprocess.run(["pandoc", "--version"], capture_output=True, check=True)
         backends.append("pandoc")
+    except Exception:
+        pass
+    try:
+        subprocess.run(["ffmpeg", "-version"], capture_output=True, check=True)
+        backends.append("ffmpeg")
     except Exception:
         pass
     return {"status": "ok", "backends": backends}
@@ -58,6 +64,8 @@ async def convert(
             _convert_image(input_path, output_path)
         elif source_ext in TEXT_FORMATS and target_format == "txt":
             _convert_text(input_path, output_path)
+        elif source_ext in AUDIO_FORMATS and target_format == "wav":
+            _normalize_audio(input_path, output_path)
         else:
             raise HTTPException(
                 status_code=422,
@@ -97,4 +105,18 @@ def _convert_text(input_path: str, output_path: str):
         raise HTTPException(
             status_code=500,
             detail=f"conversion error: {result.stderr.decode()}"
+        )
+
+def _normalize_audio(input_path: str, output_path: str):
+    result = subprocess.run([
+        "ffmpeg", "-i", input_path,
+        "-ar", "16000",
+        "-ac", "1",
+        "-c:a", "pcm_s16le",
+        output_path, "-y"
+    ], capture_output=True)
+    if result.returncode != 0:
+        raise HTTPException(
+            status_code=500,
+            detail=f"audio normalization error: {result.stderr.decode()}"
         )

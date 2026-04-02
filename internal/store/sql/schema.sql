@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS files (
     embed_model       TEXT NOT NULL,
     embedding         vector(%%EMBEDDING_DIM%%),
     chunk_index       INT NOT NULL DEFAULT 0,
+    chunk_type        TEXT,                           -- NULL = text/image, 'frame' = video frame, 'transcript' = audio/video transcript
 
     -- rich metadata (EXIF, page count, dimensions, etc.)
     metadata          JSONB,
