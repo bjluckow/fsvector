@@ -27,6 +27,9 @@ CREATE TABLE IF NOT EXISTS files (
     -- rich metadata (EXIF, page count, dimensions, etc.)
     metadata          JSONB,
 
+    -- raw extracted text
+    text_content      TEXT,
+
     -- housekeeping
     indexed_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
     deleted_at        TIMESTAMPTZ
@@ -35,11 +38,6 @@ CREATE TABLE IF NOT EXISTS files (
 -- one row per chunk per file
 CREATE UNIQUE INDEX IF NOT EXISTS files_path_chunk_idx
     ON files (path, chunk_index);
-
--- deduplication: only one canonical row per content hash
-CREATE UNIQUE INDEX IF NOT EXISTS files_canonical_hash_idx
-    ON files (content_hash)
-    WHERE canonical_path IS NULL AND deleted_at IS NULL;
 
 -- embedding similarity search (excludes deleted and duplicate rows)
 CREATE INDEX IF NOT EXISTS files_embedding_idx

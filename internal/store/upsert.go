@@ -26,6 +26,7 @@ type File struct {
 	Embedding      []float32
 	ChunkIndex     int
 	Metadata       map[string]any
+	TextContent    *string // populated for text modality only
 }
 
 // Upsert inserts or updates a file row, including its embedding.
@@ -43,13 +44,13 @@ func Upsert(ctx context.Context, conn *pgx.Conn, f File) error {
 			content_hash, size, mime_type, modality,
 			file_name, file_ext, file_created_at, file_modified_at,
 			embed_model, embedding, chunk_index,
-			metadata, indexed_at, deleted_at
+			metadata, text_content, indexed_at, deleted_at
 		) VALUES (
 			$1, $2, $3,
 			$4, $5, $6, $7,
 			$8, $9, $10, $11,
 			$12, $13, $14,
-			$15, now(), NULL
+			$15, $16, now(), NULL
 		)
 		ON CONFLICT (path, chunk_index) DO UPDATE SET
 			source           = EXCLUDED.source,
@@ -65,6 +66,7 @@ func Upsert(ctx context.Context, conn *pgx.Conn, f File) error {
 			embed_model      = EXCLUDED.embed_model,
 			embedding        = EXCLUDED.embedding,
 			metadata         = EXCLUDED.metadata,
+			text_content 	 = EXCLUDED.text_content,
 			indexed_at       = now(),
 			deleted_at       = NULL
 	`,
@@ -72,7 +74,7 @@ func Upsert(ctx context.Context, conn *pgx.Conn, f File) error {
 		f.ContentHash, f.Size, f.MimeType, f.Modality,
 		f.FileName, f.FileExt, f.FileCreatedAt, f.FileModifiedAt,
 		f.EmbedModel, embedding, f.ChunkIndex,
-		f.Metadata,
+		f.Metadata, f.TextContent,
 	)
 	if err != nil {
 		return fmt.Errorf("upsert %s: %w", f.Path, err)

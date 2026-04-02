@@ -102,6 +102,7 @@ var searchCmd = &cobra.Command{
 		}
 
 		q := search.SearchQuery{
+			Query:  args[0],
 			Vector: vectors[0],
 			Limit:  searchLimit,
 			Offset: (searchPage - 1) * searchLimit,
