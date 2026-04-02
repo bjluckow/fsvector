@@ -14,6 +14,7 @@ type Stats struct {
 	Duplicates   int
 	TextFiles    int
 	ImageFiles   int
+	AudioFiles   int
 	EmbedModel   string
 }
 
@@ -29,11 +30,13 @@ func GetStats(ctx context.Context, conn *pgx.Conn) (*Stats, error) {
 			                   AND deleted_at IS NULL)                         AS text_files,
 			COUNT(*) FILTER (WHERE modality = 'image'  AND chunk_index = 0
 			                   AND deleted_at IS NULL)                         AS image_files,
+			COUNT(*) FILTER (WHERE modality = 'audio' AND chunk_index = 0
+			                   AND deleted_at IS NULL)                         AS audio_files,
 			COALESCE(MAX(embed_model), 'none')                                 AS embed_model
 		FROM files
 	`).Scan(
 		&s.TotalFiles, &s.DeletedFiles, &s.Duplicates,
-		&s.TextFiles, &s.ImageFiles, &s.EmbedModel,
+		&s.TextFiles, &s.ImageFiles, &s.AudioFiles, &s.EmbedModel,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("stats: %w", err)
