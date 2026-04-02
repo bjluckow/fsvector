@@ -45,20 +45,22 @@ func TestNormalize_MultipleModalities(t *testing.T) {
 
 	got := search.Normalize(results)
 
-	// text: max=0.9 min=0.5
+	// global: max=0.9 min=0.1, range=0.8
+	// 0.9 → 1.0
 	if !approxEqual(got[0].NormScore, 1.0, 1e-9) {
-		t.Errorf("text max: expected 1.0, got %f", got[0].NormScore)
+		t.Errorf("expected 1.0, got %f", got[0].NormScore)
 	}
-	if !approxEqual(got[1].NormScore, 0.0, 1e-9) {
-		t.Errorf("text min: expected 0.0, got %f", got[1].NormScore)
+	// 0.5 → (0.5-0.1)/0.8 = 0.5
+	if !approxEqual(got[1].NormScore, 0.5, 1e-9) {
+		t.Errorf("expected 0.5, got %f", got[1].NormScore)
 	}
-
-	// image: max=0.3 min=0.1
-	if !approxEqual(got[2].NormScore, 1.0, 1e-9) {
-		t.Errorf("image max: expected 1.0, got %f", got[2].NormScore)
+	// 0.3 → (0.3-0.1)/0.8 = 0.25
+	if !approxEqual(got[2].NormScore, 0.25, 1e-9) {
+		t.Errorf("expected 0.25, got %f", got[2].NormScore)
 	}
+	// 0.1 → 0.0
 	if !approxEqual(got[3].NormScore, 0.0, 1e-9) {
-		t.Errorf("image min: expected 0.0, got %f", got[3].NormScore)
+		t.Errorf("expected 0.0, got %f", got[3].NormScore)
 	}
 }
 
