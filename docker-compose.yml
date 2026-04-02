@@ -19,6 +19,8 @@ services:
     build: services/embedsvc
     environment:
       EMBED_MODEL: ${EMBED_MODEL:-clip-ViT-B-32}
+      TRANSFORMERS_OFFLINE: "1"
+      HF_DATASETS_OFFLINE: "1"
     volumes:
       - hf-cache:/root/.cache/huggingface
     ports:
@@ -75,6 +77,8 @@ services:
       embedsvc:
         condition: service_healthy
       convertsvc:
+        condition: service_healthy
+      transcribesvc:
         condition: service_healthy
     restart: unless-stopped
 

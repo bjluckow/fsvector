@@ -18,8 +18,9 @@ type Config struct {
 	MinChunkSize int
 
 	// Services
-	EmbedSvcURL   string
-	ConvertSvcURL string
+	EmbedSvcURL      string
+	ConvertSvcURL    string
+	TranscribeSvcURL string
 
 	// Daemon
 	WatchPath    string
@@ -32,15 +33,16 @@ type Config struct {
 // Returns an error if any required variable is missing.
 func Load() (*Config, error) {
 	c := &Config{
-		DatabaseURL:   env("DATABASE_URL", ""),
-		ChunkSize:     envInt("CHUNK_SIZE", 1000),
-		ChunkOverlap:  envInt("CHUNK_OVERLAP", 100),
-		MinChunkSize:  envInt("MIN_CHUNK_SIZE", 100),
-		EmbedSvcURL:   env("EMBEDSVC_URL", "http://embedsvc:8000"),
-		ConvertSvcURL: env("CONVERTSVC_URL", "http://convertd:8001"),
-		WatchPath:     env("WATCH_PATH", "/data/source"),
-		EmbedModel:    env("EMBED_MODEL", "sentence-transformers/all-MiniLM-L6-v2"),
-		Source:        env("SOURCE", "local"),
+		DatabaseURL:      env("DATABASE_URL", ""),
+		ChunkSize:        envInt("CHUNK_SIZE", 1000),
+		ChunkOverlap:     envInt("CHUNK_OVERLAP", 100),
+		MinChunkSize:     envInt("MIN_CHUNK_SIZE", 100),
+		EmbedSvcURL:      env("EMBEDSVC_URL", "http://embedsvc:8000"),
+		ConvertSvcURL:    env("CONVERTSVC_URL", "http://convertd:8001"),
+		TranscribeSvcURL: env("TRANSCRIBESVC_URL", "http://transcribesvc:8002"),
+		WatchPath:        env("WATCH_PATH", "/data/source"),
+		EmbedModel:       env("EMBED_MODEL", "sentence-transformers/all-MiniLM-L6-v2"),
+		Source:           env("SOURCE", "local"),
 	}
 
 	if c.DatabaseURL == "" {
