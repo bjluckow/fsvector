@@ -35,6 +35,11 @@ type Result struct {
 	SkipReason string
 }
 
+// readFile reads the full contents of a file.
+func readFile(path string) ([]byte, error) {
+	return os.ReadFile(path)
+}
+
 // Process runs a single FileInfo through the full pipeline:
 // detect modality → convert → embed → return store.File ready for upsert.
 func Process(ctx context.Context, cfg Config, fi fsindex.FileInfo) (Result, error) {
@@ -61,10 +66,7 @@ func Process(ctx context.Context, cfg Config, fi fsindex.FileInfo) (Result, erro
 	case "audio":
 		return processAudio(ctx, cfg, fi)
 	case "video":
-		return Result{
-			Skipped:    true,
-			SkipReason: "video processing not yet implemented",
-		}, nil
+		return processVideo(ctx, cfg, fi)
 	default:
 		return Result{
 			Skipped:    true,
@@ -251,16 +253,88 @@ func processAudio(ctx context.Context, cfg Config, fi fsindex.FileInfo) (Result,
 	return Result{Files: files}, nil
 }
 
-// readFile reads the full contents of a file.
-func readFile(path string) ([]byte, error) {
-	return os.ReadFile(path)
-}
-
-// truncate cuts text to at most maxChars characters.
-func truncate(s string, maxChars int) string {
-	runes := []rune(s)
-	if len(runes) <= maxChars {
-		return s
+func processVideo(ctx context.Context, cfg Config, fi fsindex.FileInfo) (Result, error) {
+	data, err := readFile(fi.Path)
+	if err != nil {
+		return Result{}, fmt.Errorf("read %s: %w", fi.Path, err)
 	}
-	return string(runes[:maxChars])
+
+	var files []store.File
+	frameType := "frame"
+	transcriptType := "transcript"
+
+	// 1. extract and embed frames
+	frames, err := cfg.ConvertClient.ExtractVideoFrames(ctx, fi.Name, data, cfg.VideoFrameRate)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "    extract frames %s: %v\n", fi.Path, err)
+	} else {
+		for _, frame := range frames {
+			vector, err := cfg.EmbedClient.EmbedImage(ctx, fi.Name, frame.Data)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "    embed frame %d %s: %v\n", frame.Index, fi.Path, err)
+				continue
+			}
+			files = append(files, store.File{
+				Path:           fi.Path,
+				Source:         cfg.Source,
+				ContentHash:    fi.Hash,
+				Size:           fi.Size,
+				MimeType:       fi.MimeType,
+				Modality:       "video",
+				FileName:       fi.Name,
+				FileExt:        fi.Ext,
+				FileCreatedAt:  &fi.CreatedAt,
+				FileModifiedAt: &fi.ModifiedAt,
+				EmbedModel:     cfg.EmbedModel,
+				Embedding:      vector,
+				ChunkIndex:     frame.Index,
+				ChunkType:      &frameType,
+				Metadata: map[string]any{
+					"timestamp_ms": frame.TimestampMs,
+					"frame_index":  frame.Index,
+					"fps":          cfg.VideoFrameRate,
+				},
+			})
+		}
+	}
+
+	transcriptOffset := len(frames)
+
+	// 2. extract audio track and transcribe
+	audioData, err := cfg.ConvertClient.ExtractVideoAudio(ctx, fi.Name, data)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "    extract audio %s: %v\n", fi.Path, err)
+	} else {
+		resp, err := cfg.TranscribeClient.Transcribe(ctx, fi.Name+".wav", audioData)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "    transcribe %s: %v\n", fi.Path, err)
+		} else if strings.TrimSpace(resp.Text) != "" {
+			chunks := chunk.Split(resp.Text, cfg.ChunkSize, cfg.ChunkOverlap, cfg.MinChunkSize)
+			for i, c := range chunks {
+				f, err := processTextChunk(ctx, cfg, fi, c, transcriptOffset+i)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "    transcript chunk %d %s: %v\n", i, fi.Path, err)
+					continue
+				}
+				if f != nil {
+					f.Modality = "video"
+					f.ChunkType = &transcriptType
+					f.Metadata = map[string]any{
+						"duration_seconds": resp.DurationSeconds,
+						"language":         resp.Language,
+					}
+					files = append(files, *f)
+				}
+			}
+		}
+	}
+
+	if len(files) == 0 {
+		return Result{
+			Skipped:    true,
+			SkipReason: "no frames or transcript produced",
+		}, nil
+	}
+
+	return Result{Files: files}, nil
 }
