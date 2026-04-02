@@ -21,6 +21,7 @@ type Config struct {
 	EmbedSvcURL      string
 	ConvertSvcURL    string
 	TranscribeSvcURL string
+	VisionSvcURL     string
 
 	// Daemon
 	WatchPath    string
@@ -43,6 +44,7 @@ func Load() (*Config, error) {
 		EmbedSvcURL:      env("EMBEDSVC_URL", "http://embedsvc:8000"),
 		ConvertSvcURL:    env("CONVERTSVC_URL", "http://convertd:8001"),
 		TranscribeSvcURL: env("TRANSCRIBESVC_URL", "http://transcribesvc:8002"),
+		VisionSvcURL:     env("VISIONSVC_URL", "http://visionsvc:8003"),
 		WatchPath:        env("WATCH_PATH", "/data/source"),
 		EmbedModel:       env("EMBED_MODEL", "sentence-transformers/all-MiniLM-L6-v2"),
 		Source:           env("SOURCE", "local"),

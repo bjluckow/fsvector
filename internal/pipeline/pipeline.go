@@ -8,6 +8,7 @@ import (
 	"github.com/bjluckow/fsvector/internal/clients/convert"
 	"github.com/bjluckow/fsvector/internal/clients/embed"
 	"github.com/bjluckow/fsvector/internal/clients/transcribe"
+	"github.com/bjluckow/fsvector/internal/clients/vision"
 	"github.com/bjluckow/fsvector/internal/fsindex"
 	"github.com/bjluckow/fsvector/internal/store"
 )
@@ -17,6 +18,7 @@ type Config struct {
 	EmbedClient      *embed.Client
 	ConvertClient    *convert.Client
 	TranscribeClient *transcribe.Client
+	VisionClient     *vision.Client
 	EmbedModel       string
 	Source           string
 	MinEmbedSize     int64
