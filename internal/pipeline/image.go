@@ -32,12 +32,8 @@ func processImage(ctx context.Context, cfg Config, fi fsindex.FileInfo) (Result,
 	}
 
 	// vision: caption + OCR
-	captionText, ocrFiles, err := describeImage(ctx, cfg, fi, data, 1)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "    vision %s: %v\n", fi.Path, err)
-		captionText = ""
-		ocrFiles = nil
-	}
+	captionText := describeImage(ctx, cfg, fi, data)
+	ocrFiles := extractImageText(ctx, cfg, fi, data, 1)
 
 	primaryRow := store.File{
 		Path:           fi.Path,
@@ -60,37 +56,45 @@ func processImage(ctx context.Context, cfg Config, fi fsindex.FileInfo) (Result,
 	return Result{Files: files}, nil
 }
 
-// describeImage calls visionsvc to get a caption and OCR text.
-// captionText is returned for the primary row's text_content.
-// ocrFiles are additional rows starting at chunkOffset.
-// Non-fatal — returns empty caption and nil ocrFiles on error.
+// describeImage returns a caption for the image.
+// Non-fatal — returns empty string on error.
 func describeImage(
 	ctx context.Context,
 	cfg Config,
 	fi fsindex.FileInfo,
 	imageData []byte,
-	chunkOffset int,
-) (captionText string, ocrFiles []store.File, err error) {
+) string {
 	if cfg.VisionClient == nil {
-		return "", nil, nil
+		return ""
 	}
-
-	// caption
 	capResp, err := cfg.VisionClient.Caption(ctx, fi.Name, imageData)
 	if err != nil {
-		return "", nil, fmt.Errorf("caption: %w", err)
+		fmt.Fprintf(os.Stderr, "    caption %s: %v\n", fi.Path, err)
+		return ""
 	}
-	captionText = capResp.Caption
+	return capResp.Caption
+}
 
-	// OCR
+// extractImageText runs OCR and returns embedded text chunks.
+// Non-fatal — returns nil on error or no text found.
+func extractImageText(
+	ctx context.Context,
+	cfg Config,
+	fi fsindex.FileInfo,
+	imageData []byte,
+	chunkOffset int,
+) []store.File {
+	if cfg.VisionClient == nil {
+		return nil
+	}
 	ocrResp, err := cfg.VisionClient.OCR(ctx, fi.Name, imageData)
 	if err != nil || strings.TrimSpace(ocrResp.Text) == "" {
-		return captionText, nil, nil
+		return nil
 	}
 
-	// chunk OCR text
 	chunks := chunk.Split(ocrResp.Text, cfg.ChunkSize, cfg.ChunkOverlap, cfg.MinChunkSize)
 	ocrType := "ocr"
+	var files []store.File
 	for i, c := range chunks {
 		f, err := processTextChunk(ctx, cfg, fi, c, chunkOffset+i)
 		if err != nil || f == nil {
@@ -98,8 +102,7 @@ func describeImage(
 		}
 		f.Modality = "image"
 		f.ChunkType = &ocrType
-		ocrFiles = append(ocrFiles, *f)
+		files = append(files, *f)
 	}
-
-	return captionText, ocrFiles, nil
+	return files
 }

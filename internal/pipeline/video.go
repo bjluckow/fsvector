@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/bjluckow/fsvector/internal/chunk"
+	"github.com/bjluckow/fsvector/internal/clients/convert"
 	"github.com/bjluckow/fsvector/internal/fsindex"
 	"github.com/bjluckow/fsvector/internal/store"
 )
@@ -18,74 +19,24 @@ func processVideo(ctx context.Context, cfg Config, fi fsindex.FileInfo) (Result,
 	}
 
 	var files []store.File
-	frameType := "frame"
-	transcriptType := "transcript"
 
-	// 1. extract and embed frames
+	// frames
 	frames, err := cfg.ConvertClient.ExtractVideoFrames(ctx, fi.Name, data, cfg.VideoFrameRate)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "    extract frames %s: %v\n", fi.Path, err)
 	} else {
 		for _, frame := range frames {
-			vector, err := cfg.EmbedClient.EmbedImage(ctx, fi.Name, frame.Data)
+			f, err := processVideoFrame(ctx, cfg, fi, frame)
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "    embed frame %d %s: %v\n", frame.Index, fi.Path, err)
+				fmt.Fprintf(os.Stderr, "    frame %d %s: %v\n", frame.Index, fi.Path, err)
 				continue
 			}
-			files = append(files, store.File{
-				Path:           fi.Path,
-				Source:         cfg.Source,
-				ContentHash:    fi.Hash,
-				Size:           fi.Size,
-				MimeType:       fi.MimeType,
-				Modality:       "video",
-				FileName:       fi.Name,
-				FileExt:        fi.Ext,
-				FileCreatedAt:  &fi.CreatedAt,
-				FileModifiedAt: &fi.ModifiedAt,
-				EmbedModel:     cfg.EmbedModel,
-				Embedding:      vector,
-				ChunkIndex:     frame.Index,
-				ChunkType:      &frameType,
-				Metadata: map[string]any{
-					"timestamp_ms": frame.TimestampMs,
-					"frame_index":  frame.Index,
-					"fps":          cfg.VideoFrameRate,
-				},
-			})
+			files = append(files, f)
 		}
 	}
 
-	transcriptOffset := len(frames)
-
-	// 2. extract audio track and transcribe
-	audioData, err := cfg.ConvertClient.ExtractVideoAudio(ctx, fi.Name, data)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "    extract audio %s: %v\n", fi.Path, err)
-	} else {
-		resp, err := cfg.TranscribeClient.Transcribe(ctx, fi.Name+".wav", audioData)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "    transcribe %s: %v\n", fi.Path, err)
-		} else if strings.TrimSpace(resp.Text) != "" {
-			chunks := chunk.Split(resp.Text, cfg.ChunkSize, cfg.ChunkOverlap, cfg.MinChunkSize)
-			for i, c := range chunks {
-				f, err := processTextChunk(ctx, cfg, fi, c, transcriptOffset+i)
-				if err != nil {
-					fmt.Fprintf(os.Stderr, "    transcript chunk %d %s: %v\n", i, fi.Path, err)
-					continue
-				}
-				if f != nil {
-					f.Modality = "video"
-					f.ChunkType = &transcriptType
-					f.Metadata = map[string]any{
-						"duration_seconds": resp.DurationSeconds,
-						"language":         resp.Language,
-					}
-					files = append(files, *f)
-				}
-			}
-		}
-	}
+	// audio transcript
+	files = append(files, processVideoAudio(ctx, cfg, fi, data, len(frames))...)
 
 	if len(files) == 0 {
 		return Result{
@@ -95,4 +46,87 @@ func processVideo(ctx context.Context, cfg Config, fi fsindex.FileInfo) (Result,
 	}
 
 	return Result{Files: files}, nil
+}
+
+// processVideoFrame embeds a single video frame and gets its caption.
+func processVideoFrame(
+	ctx context.Context,
+	cfg Config,
+	fi fsindex.FileInfo,
+	frame convert.Frame,
+) (store.File, error) {
+	vector, err := cfg.EmbedClient.EmbedImage(ctx, fi.Name, frame.Data)
+	if err != nil {
+		return store.File{}, fmt.Errorf("embed: %w", err)
+	}
+
+	captionText := describeImage(ctx, cfg, fi, frame.Data)
+	frameType := "frame"
+
+	return store.File{
+		Path:           fi.Path,
+		Source:         cfg.Source,
+		ContentHash:    fi.Hash,
+		Size:           fi.Size,
+		MimeType:       fi.MimeType,
+		Modality:       "video",
+		FileName:       fi.Name,
+		FileExt:        fi.Ext,
+		FileCreatedAt:  &fi.CreatedAt,
+		FileModifiedAt: &fi.ModifiedAt,
+		EmbedModel:     cfg.EmbedModel,
+		Embedding:      vector,
+		ChunkIndex:     frame.Index,
+		ChunkType:      &frameType,
+		TextContent:    &captionText,
+		Metadata: map[string]any{
+			"timestamp_ms": frame.TimestampMs,
+			"frame_index":  frame.Index,
+			"fps":          cfg.VideoFrameRate,
+		},
+	}, nil
+}
+
+// processVideoAudio extracts, transcribes and chunks the audio track of a video.
+// Returns transcript chunks starting at chunkOffset.
+// Non-fatal — returns nil on error or empty transcript.
+func processVideoAudio(
+	ctx context.Context,
+	cfg Config,
+	fi fsindex.FileInfo,
+	videoData []byte,
+	chunkOffset int,
+) []store.File {
+	audioData, err := cfg.ConvertClient.ExtractVideoAudio(ctx, fi.Name, videoData)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "    extract audio %s: %v\n", fi.Path, err)
+		return nil
+	}
+
+	resp, err := cfg.TranscribeClient.Transcribe(ctx, fi.Name+".wav", audioData)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "    transcribe %s: %v\n", fi.Path, err)
+		return nil
+	}
+	if strings.TrimSpace(resp.Text) == "" {
+		return nil
+	}
+
+	transcriptType := "transcript"
+	chunks := chunk.Split(resp.Text, cfg.ChunkSize, cfg.ChunkOverlap, cfg.MinChunkSize)
+	var files []store.File
+	for i, c := range chunks {
+		f, err := processTextChunk(ctx, cfg, fi, c, chunkOffset+i)
+		if err != nil || f == nil {
+			continue
+		}
+		f.Modality = "video"
+		f.ChunkType = &transcriptType
+		f.Metadata = map[string]any{
+			"duration_seconds": resp.DurationSeconds,
+			"language":         resp.Language,
+		}
+		files = append(files, *f)
+	}
+	return files
 }
