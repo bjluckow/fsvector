@@ -27,6 +27,9 @@ type Config struct {
 	EmbedModel   string
 	Source       string // "local" or "s3://bucket/prefix"
 	MinEmbedSize int64
+
+	// Processing
+	VideoFrameRate float64
 }
 
 // Load reads configuration from environment variables.
@@ -43,6 +46,7 @@ func Load() (*Config, error) {
 		WatchPath:        env("WATCH_PATH", "/data/source"),
 		EmbedModel:       env("EMBED_MODEL", "sentence-transformers/all-MiniLM-L6-v2"),
 		Source:           env("SOURCE", "local"),
+		VideoFrameRate:   envFloat("VIDEO_FRAME_RATE", 1.0),
 	}
 
 	if c.DatabaseURL == "" {
@@ -59,8 +63,6 @@ func Load() (*Config, error) {
 	return c, nil
 }
 
-// env returns the value of the named environment variable,
-// or the provided fallback if the variable is unset or empty.
 func env(key, fallback string) string {
 	if v := os.Getenv(key); v != "" {
 		return v
@@ -68,8 +70,6 @@ func env(key, fallback string) string {
 	return fallback
 }
 
-// envInt returns the integer value of the named environment variable,
-// or the provided fallback if the variable is unset or empty.
 func envInt(key string, fallback int) int {
 	v := os.Getenv(key)
 	if v == "" {
@@ -80,4 +80,16 @@ func envInt(key string, fallback int) int {
 		return fallback
 	}
 	return n
+}
+
+func envFloat(key string, fallback float64) float64 {
+	v := os.Getenv(key)
+	if v == "" {
+		return fallback
+	}
+	f, err := strconv.ParseFloat(v, 64)
+	if err != nil {
+		return fallback
+	}
+	return f
 }

@@ -95,6 +95,7 @@ func main() {
 		ChunkSize:        cfg.ChunkSize,
 		ChunkOverlap:     cfg.ChunkOverlap,
 		MinChunkSize:     cfg.MinChunkSize,
+		VideoFrameRate:   cfg.VideoFrameRate,
 	}
 
 	if err := reconcile(ctx, conn, pCfg, cfg.WatchPath); err != nil {

@@ -25,6 +25,7 @@ type Config struct {
 	ChunkSize        int
 	ChunkOverlap     int
 	MinChunkSize     int
+	VideoFrameRate   float64
 }
 
 // Result is returned after a file has been processed.
@@ -59,6 +60,11 @@ func Process(ctx context.Context, cfg Config, fi fsindex.FileInfo) (Result, erro
 		return processImage(ctx, cfg, fi)
 	case "audio":
 		return processAudio(ctx, cfg, fi)
+	case "video":
+		return Result{
+			Skipped:    true,
+			SkipReason: "video processing not yet implemented",
+		}, nil
 	default:
 		return Result{
 			Skipped:    true,
