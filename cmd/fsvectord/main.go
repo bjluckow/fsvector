@@ -10,6 +10,7 @@ import (
 	"github.com/bjluckow/fsvector/internal/clients/convert"
 	"github.com/bjluckow/fsvector/internal/clients/embed"
 	"github.com/bjluckow/fsvector/internal/clients/transcribe"
+	"github.com/bjluckow/fsvector/internal/clients/vision"
 	"github.com/bjluckow/fsvector/internal/config"
 	"github.com/bjluckow/fsvector/internal/fsindex"
 	"github.com/bjluckow/fsvector/internal/fswatch"
@@ -55,6 +56,14 @@ func main() {
 	}
 	fmt.Printf("  transcribe model: %s\n", transcribeHealth.Model)
 
+	visionClient := vision.NewClient(cfg.VisionSvcURL)
+	visionHealth, err := visionClient.Health(ctx)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "fsvectord: visionsvc unreachable: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("  vision model : %s (ocr=%v)\n", visionHealth.CaptionModel, visionHealth.OCR)
+
 	// ── connect to postgres ───────────────────────────────────────────────────
 	conn, err := pgx.Connect(ctx, cfg.DatabaseURL)
 	if err != nil {
@@ -89,6 +98,7 @@ func main() {
 		EmbedClient:      embedClient,
 		ConvertClient:    convertClient,
 		TranscribeClient: transcribeClient,
+		VisionClient:     visionClient,
 		EmbedModel:       health.Model,
 		Source:           cfg.Source,
 		MinEmbedSize:     cfg.MinEmbedSize,

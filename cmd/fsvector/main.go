@@ -149,6 +149,9 @@ var searchCmd = &cobra.Command{
 			q.MinScore = &searchMinScore
 		}
 
+		fmt.Printf("DEBUG: embedsvc=%s vector_dim=%d vector[:3]=%v\n",
+			cfg.EmbedSvcURL, len(vectors[0]), vectors[0][:3])
+
 		results, err := search.Search(ctx, conn, q)
 		if err != nil {
 			return err
