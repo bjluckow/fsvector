@@ -4,50 +4,13 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"strings"
 
+	"github.com/bjluckow/fsvector/internal/chunk"
 	"github.com/bjluckow/fsvector/internal/convert"
 	"github.com/bjluckow/fsvector/internal/embed"
 	"github.com/bjluckow/fsvector/internal/fsindex"
 	"github.com/bjluckow/fsvector/internal/store"
 )
-
-// textExts are file extensions we treat as text-modal and send through pandoc if needed.
-var textExts = map[string]string{
-	"txt":  "txt",
-	"md":   "txt",
-	"go":   "txt",
-	"py":   "txt",
-	"js":   "txt",
-	"ts":   "txt",
-	"html": "txt",
-	"htm":  "txt",
-	"css":  "txt",
-	"json": "txt",
-	"yaml": "txt",
-	"yml":  "txt",
-	"toml": "txt",
-	"sh":   "txt",
-	"pdf":  "txt",
-	"docx": "txt",
-	"doc":  "txt",
-	"odt":  "txt",
-	"rtf":  "txt",
-}
-
-// imageExts are file extensions we treat as image-modal.
-var imageExts = map[string]string{
-	"jpg":  "jpeg",
-	"jpeg": "jpeg",
-	"png":  "jpeg",
-	"gif":  "jpeg",
-	"webp": "jpeg",
-	"bmp":  "jpeg",
-	"tiff": "jpeg",
-	"tif":  "jpeg",
-	"heic": "jpeg",
-	"heif": "jpeg",
-}
 
 // Config holds the dependencies for the pipeline.
 type Config struct {
@@ -56,11 +19,14 @@ type Config struct {
 	EmbedModel    string
 	Source        string
 	MinEmbedSize  int64
+	ChunkSize     int
+	ChunkOverlap  int
+	MinChunkSize  int
 }
 
 // Result is returned after a file has been processed.
 type Result struct {
-	File       store.File
+	Files      []store.File
 	Skipped    bool
 	SkipReason string
 }
@@ -68,9 +34,6 @@ type Result struct {
 // Process runs a single FileInfo through the full pipeline:
 // detect modality → convert → embed → return store.File ready for upsert.
 func Process(ctx context.Context, cfg Config, fi fsindex.FileInfo) (Result, error) {
-	ext := strings.ToLower(fi.Ext)
-
-	// skip files that are too small to be worth embedding
 	if fi.Size < cfg.MinEmbedSize {
 		return Result{
 			Skipped:    true,
@@ -78,90 +41,109 @@ func Process(ctx context.Context, cfg Config, fi fsindex.FileInfo) (Result, erro
 		}, nil
 	}
 
-	// detect modality
-	if targetFmt, ok := textExts[ext]; ok {
-		return processText(ctx, cfg, fi, targetFmt)
-	}
-	if targetFmt, ok := imageExts[ext]; ok {
-		return processImage(ctx, cfg, fi, targetFmt)
+	modality, supported := Modality(fi.Ext)
+	if !supported {
+		return Result{
+			Skipped:    true,
+			SkipReason: fmt.Sprintf("unsupported extension: %s", fi.Ext),
+		}, nil
 	}
 
-	// unsupported type — skip cleanly
-	return Result{
-		Skipped:    true,
-		SkipReason: fmt.Sprintf("unsupported extension: %s", ext),
-	}, nil
+	switch modality {
+	case "text":
+		return processText(ctx, cfg, fi)
+	case "image":
+		return processImage(ctx, cfg, fi)
+	default:
+		return Result{
+			Skipped:    true,
+			SkipReason: fmt.Sprintf("unhandled modality: %s", modality),
+		}, nil
+	}
 }
 
-func processText(ctx context.Context, cfg Config, fi fsindex.FileInfo, targetFmt string) (Result, error) {
-	var text string
-
-	// plain text formats can be read directly without conversion
-	plainExts := map[string]bool{
-		"txt": true, "md": true, "go": true, "py": true,
-		"js": true, "ts": true, "css": true, "json": true,
-		"yaml": true, "yml": true, "toml": true, "sh": true,
-	}
-
-	if plainExts[fi.Ext] {
-		data, err := readFile(fi.Path)
-		if err != nil {
-			return Result{}, fmt.Errorf("read %s: %w", fi.Path, err)
-		}
-		text = string(data)
-	} else {
-		// send through convertsvc (pdf, docx, etc.)
-		data, err := readFile(fi.Path)
-		if err != nil {
-			return Result{}, fmt.Errorf("read %s: %w", fi.Path, err)
-		}
-		converted, err := cfg.ConvertClient.Convert(ctx, fi.Name, data, targetFmt)
-		if err != nil {
-			return Result{}, fmt.Errorf("convert %s: %w", fi.Path, err)
-		}
-		text = string(converted)
-	}
-
-	// truncate to avoid blowing the model's token limit
-	text = truncate(text, 4096)
-
-	// embed
-	vectors, err := cfg.EmbedClient.EmbedTexts(ctx, []string{text})
-	if err != nil {
-		return Result{}, fmt.Errorf("embed text %s: %w", fi.Path, err)
-	}
-	if len(vectors) == 0 {
-		return Result{}, fmt.Errorf("embed returned no vectors for %s", fi.Path)
-	}
-
-	return Result{
-		File: store.File{
-			Path:           fi.Path,
-			Source:         cfg.Source,
-			ContentHash:    fi.Hash,
-			Size:           fi.Size,
-			MimeType:       fi.MimeType,
-			Modality:       "text",
-			FileName:       fi.Name,
-			FileExt:        fi.Ext,
-			FileCreatedAt:  &fi.CreatedAt,
-			FileModifiedAt: &fi.ModifiedAt,
-			EmbedModel:     cfg.EmbedModel,
-			Embedding:      vectors[0],
-			ChunkIndex:     0,
-		},
-	}, nil
-}
-
-func processImage(ctx context.Context, cfg Config, fi fsindex.FileInfo, targetFmt string) (Result, error) {
+func processText(ctx context.Context, cfg Config, fi fsindex.FileInfo) (Result, error) {
 	data, err := readFile(fi.Path)
 	if err != nil {
 		return Result{}, fmt.Errorf("read %s: %w", fi.Path, err)
 	}
 
-	// convert to normalized format if needed
-	if fi.Ext != targetFmt && fi.Ext != "jpg" {
-		data, err = cfg.ConvertClient.Convert(ctx, fi.Name, data, targetFmt)
+	var text string
+	if target := ConvertTarget(fi.Ext); target != "" {
+		converted, err := cfg.ConvertClient.Convert(ctx, fi.Name, data, target)
+		if err != nil {
+			return Result{}, fmt.Errorf("convert %s: %w", fi.Path, err)
+		}
+		text = string(converted)
+	} else {
+		text = string(data)
+	}
+
+	chunks := chunk.Split(text, cfg.ChunkSize, cfg.ChunkOverlap, cfg.MinChunkSize)
+	if len(chunks) == 0 {
+		return Result{
+			Skipped:    true,
+			SkipReason: "no embeddable content after chunking",
+		}, nil
+	}
+
+	var files []store.File
+	for i, c := range chunks {
+		f, err := processTextChunk(ctx, cfg, fi, c, i)
+		if err != nil {
+			return Result{}, fmt.Errorf("chunk %d of %s: %w", i, fi.Path, err)
+		}
+		if f != nil {
+			files = append(files, *f)
+		}
+	}
+
+	if len(files) == 0 {
+		return Result{
+			Skipped:    true,
+			SkipReason: "all chunks failed to embed",
+		}, nil
+	}
+
+	return Result{Files: files}, nil
+}
+
+// processTextChunk embeds a single text chunk and returns a store.File.
+// Returns nil if the embed service returns no vectors.
+func processTextChunk(ctx context.Context, cfg Config, fi fsindex.FileInfo, text string, chunkIndex int) (*store.File, error) {
+	vectors, err := cfg.EmbedClient.EmbedTexts(ctx, []string{text})
+	if err != nil {
+		return nil, fmt.Errorf("embed: %w", err)
+	}
+	if len(vectors) == 0 {
+		return nil, nil
+	}
+
+	return &store.File{
+		Path:           fi.Path,
+		Source:         cfg.Source,
+		ContentHash:    fi.Hash,
+		Size:           fi.Size,
+		MimeType:       fi.MimeType,
+		Modality:       "text",
+		FileName:       fi.Name,
+		FileExt:        fi.Ext,
+		FileCreatedAt:  &fi.CreatedAt,
+		FileModifiedAt: &fi.ModifiedAt,
+		EmbedModel:     cfg.EmbedModel,
+		Embedding:      vectors[0],
+		ChunkIndex:     chunkIndex,
+	}, nil
+}
+
+func processImage(ctx context.Context, cfg Config, fi fsindex.FileInfo) (Result, error) {
+	data, err := readFile(fi.Path)
+	if err != nil {
+		return Result{}, fmt.Errorf("read %s: %w", fi.Path, err)
+	}
+
+	if target := ConvertTarget(fi.Ext); target != "" {
+		data, err = cfg.ConvertClient.Convert(ctx, fi.Name, data, target)
 		if err != nil {
 			return Result{}, fmt.Errorf("convert image %s: %w", fi.Path, err)
 		}
@@ -174,20 +156,22 @@ func processImage(ctx context.Context, cfg Config, fi fsindex.FileInfo, targetFm
 	}
 
 	return Result{
-		File: store.File{
-			Path:           fi.Path,
-			Source:         cfg.Source,
-			ContentHash:    fi.Hash,
-			Size:           fi.Size,
-			MimeType:       fi.MimeType,
-			Modality:       "image",
-			FileName:       fi.Name,
-			FileExt:        fi.Ext,
-			FileCreatedAt:  &fi.CreatedAt,
-			FileModifiedAt: &fi.ModifiedAt,
-			EmbedModel:     cfg.EmbedModel,
-			Embedding:      vector,
-			ChunkIndex:     0,
+		Files: []store.File{
+			{
+				Path:           fi.Path,
+				Source:         cfg.Source,
+				ContentHash:    fi.Hash,
+				Size:           fi.Size,
+				MimeType:       fi.MimeType,
+				Modality:       "image",
+				FileName:       fi.Name,
+				FileExt:        fi.Ext,
+				FileCreatedAt:  &fi.CreatedAt,
+				FileModifiedAt: &fi.ModifiedAt,
+				EmbedModel:     cfg.EmbedModel,
+				Embedding:      vector,
+				ChunkIndex:     0,
+			},
 		},
 	}, nil
 }

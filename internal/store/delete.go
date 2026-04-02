@@ -60,3 +60,20 @@ func LivePaths(ctx context.Context, conn *pgx.Conn) (map[string]string, error) {
 	}
 	return result, rows.Err()
 }
+
+// DeleteStaleChunks hard-deletes chunks with index >= newChunkCount for
+// a given path and model. Called after re-indexing to clean up chunks
+// that no longer exist. This is a hard delete — stale chunks are index
+// artifacts, not filesystem deletions.
+func DeleteStaleChunks(ctx context.Context, conn *pgx.Conn, path, embedModel string, newChunkCount int) error {
+	_, err := conn.Exec(ctx, `
+		DELETE FROM files
+		WHERE path = $1
+		  AND embed_model = $2
+		  AND chunk_index >= $3
+	`, path, embedModel, newChunkCount)
+	if err != nil {
+		return fmt.Errorf("delete stale chunks %s: %w", path, err)
+	}
+	return nil
+}

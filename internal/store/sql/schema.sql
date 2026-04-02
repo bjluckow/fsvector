@@ -36,11 +36,6 @@ CREATE TABLE IF NOT EXISTS files (
 CREATE UNIQUE INDEX IF NOT EXISTS files_path_chunk_idx
     ON files (path, chunk_index);
 
--- deduplication: only one canonical row per content hash
-CREATE UNIQUE INDEX IF NOT EXISTS files_canonical_hash_idx
-    ON files (content_hash)
-    WHERE canonical_path IS NULL AND deleted_at IS NULL;
-
 -- embedding similarity search (excludes deleted and duplicate rows)
 CREATE INDEX IF NOT EXISTS files_embedding_idx
     ON files USING hnsw (embedding vector_cosine_ops)

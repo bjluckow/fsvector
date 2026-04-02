@@ -74,6 +74,10 @@ func main() {
 		ConvertClient: convertClient,
 		EmbedModel:    health.Model,
 		Source:        cfg.Source,
+		MinEmbedSize:  cfg.MinEmbedSize,
+		ChunkSize:     cfg.ChunkSize,
+		ChunkOverlap:  cfg.ChunkOverlap,
+		MinChunkSize:  cfg.MinChunkSize,
 	}
 
 	if err := reconcile(ctx, conn, pCfg, cfg.WatchPath); err != nil {
@@ -169,7 +173,6 @@ func reconcile(ctx context.Context, conn *pgx.Conn, pCfg pipeline.Config, watchP
 			continue
 		}
 
-		// run through the pipeline
 		result, err := pipeline.Process(ctx, pCfg, fi)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "    pipeline %s: %v\n", fi.Path, err)
@@ -181,12 +184,19 @@ func reconcile(ctx context.Context, conn *pgx.Conn, pCfg pipeline.Config, watchP
 			continue
 		}
 
-		if err := store.Upsert(ctx, conn, result.File); err != nil {
-			fmt.Fprintf(os.Stderr, "    upsert %s: %v\n", fi.Path, err)
-			continue
+		for _, f := range result.Files {
+			if err := store.Upsert(ctx, conn, f); err != nil {
+				fmt.Fprintf(os.Stderr, "    upsert %s chunk %d: %v\n", fi.Path, f.ChunkIndex, err)
+				continue
+			}
 		}
 
-		fmt.Printf("    indexed %s (%s)\n", fi.Path, result.File.Modality)
+		// clean up stale chunks from previous indexing
+		if err := store.DeleteStaleChunks(ctx, conn, fi.Path, pCfg.EmbedModel, len(result.Files)); err != nil {
+			fmt.Fprintf(os.Stderr, "    stale chunks %s: %v\n", fi.Path, err)
+		}
+
+		fmt.Printf("    indexed %s (%s, %d chunks)\n", fi.Path, result.Files[0].Modality, len(result.Files))
 		indexed++
 	}
 
@@ -225,11 +235,18 @@ func handleEvents(ctx context.Context, conn *pgx.Conn, pCfg pipeline.Config, eve
 					continue
 				}
 
-				if err := store.Upsert(ctx, conn, result.File); err != nil {
-					fmt.Fprintf(os.Stderr, "  upsert %s: %v\n", e.Path, err)
-					continue
+				for _, f := range result.Files {
+					if err := store.Upsert(ctx, conn, f); err != nil {
+						fmt.Fprintf(os.Stderr, "  upsert %s chunk %d: %v\n", e.Path, f.ChunkIndex, err)
+						continue
+					}
 				}
-				fmt.Printf("  %s %s (%s)\n", e.Kind, e.Path, result.File.Modality)
+
+				if err := store.DeleteStaleChunks(ctx, conn, e.Path, pCfg.EmbedModel, len(result.Files)); err != nil {
+					fmt.Fprintf(os.Stderr, "  stale chunks %s: %v\n", e.Path, err)
+				}
+
+				fmt.Printf("  %s %s (%s, %d chunks)\n", e.Kind, e.Path, result.Files[0].Modality, len(result.Files))
 			}
 		}
 	}
