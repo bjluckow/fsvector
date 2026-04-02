@@ -43,66 +43,79 @@ type SearchQuery struct {
 func Search(ctx context.Context, conn *pgx.Conn, q SearchQuery) ([]SearchResult, error) {
 	v := pgvector.NewVector(q.Vector)
 
-	sql := `
-		SELECT
+	embeddingCol := "embedding"
+
+	inner := fmt.Sprintf(`
+		SELECT DISTINCT ON (path)
 			path,
 			modality,
 			file_ext,
 			size,
-			1 - (embedding <=> $1) AS score,
+			1 - (%s <=> $1) AS score,
 			indexed_at,
 			file_modified_at
 		FROM files
 		WHERE deleted_at IS NULL
 		  AND canonical_path IS NULL
-		  AND embedding IS NOT NULL
-	`
+		  AND %s IS NOT NULL
+	`, embeddingCol, embeddingCol)
 
 	args := []any{v, q.Limit, q.Offset}
-	idx := 4 // next parameter index
+	idx := 4
 
 	if q.Modality != "" {
-		sql += fmt.Sprintf(" AND modality = $%d", idx)
+		inner += fmt.Sprintf(" AND modality = $%d", idx)
 		args = append(args, q.Modality)
 		idx++
 	}
 	if q.Ext != "" {
-		sql += fmt.Sprintf(" AND file_ext = $%d", idx)
+		inner += fmt.Sprintf(" AND file_ext = $%d", idx)
 		args = append(args, q.Ext)
 		idx++
 	}
 	if q.Source != "" {
-		sql += fmt.Sprintf(" AND source = $%d", idx)
+		inner += fmt.Sprintf(" AND source = $%d", idx)
 		args = append(args, q.Source)
 		idx++
 	}
 	if q.Since != nil {
-		sql += fmt.Sprintf(" AND file_modified_at >= $%d", idx)
+		inner += fmt.Sprintf(" AND file_modified_at >= $%d", idx)
 		args = append(args, q.Since)
 		idx++
 	}
 	if q.Before != nil {
-		sql += fmt.Sprintf(" AND file_modified_at <= $%d", idx)
+		inner += fmt.Sprintf(" AND file_modified_at <= $%d", idx)
 		args = append(args, q.Before)
 		idx++
 	}
 	if q.MinSize != nil {
-		sql += fmt.Sprintf(" AND size >= $%d", idx)
+		inner += fmt.Sprintf(" AND size >= $%d", idx)
 		args = append(args, q.MinSize)
 		idx++
 	}
 	if q.MaxSize != nil {
-		sql += fmt.Sprintf(" AND size <= $%d", idx)
+		inner += fmt.Sprintf(" AND size <= $%d", idx)
 		args = append(args, q.MaxSize)
 		idx++
 	}
 	if q.MinScore != nil {
-		sql += fmt.Sprintf(" AND 1 - (embedding <=> $1) >= $%d", idx)
+		inner += fmt.Sprintf(" AND 1 - (%s <=> $1) >= $%d", embeddingCol, idx)
 		args = append(args, q.MinScore)
 		idx++
 	}
 
-	sql += " ORDER BY embedding <=> $1 LIMIT $2 OFFSET $3"
+	// DISTINCT ON requires ORDER BY to start with the distinct expression
+	// then the similarity — this picks the best chunk per path
+	inner += fmt.Sprintf(" ORDER BY path, %s <=> $1", embeddingCol)
+
+	// wrap in outer query to apply limit/offset after deduplication
+	// and re-sort by score descending
+	sql := fmt.Sprintf(`
+		SELECT path, modality, file_ext, size, score, indexed_at, file_modified_at
+		FROM (%s) deduped
+		ORDER BY score DESC
+		LIMIT $2 OFFSET $3
+	`, inner)
 
 	rows, err := conn.Query(ctx, sql, args...)
 	if err != nil {
