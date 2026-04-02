@@ -98,7 +98,6 @@ func describeImage(
 		}
 		f.Modality = "image"
 		f.ChunkType = &ocrType
-		f.Embedding = nil
 		ocrFiles = append(ocrFiles, *f)
 	}
 
