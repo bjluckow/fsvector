@@ -45,85 +45,104 @@ func Search(ctx context.Context, conn *pgx.Conn, q SearchQuery) ([]SearchResult,
 	v := pgvector.NewVector(q.Vector)
 	embeddingCol := "embedding"
 
-	inner := `
-		SELECT DISTINCT ON (path)
-			path,
-			modality,
-			file_ext,
-			size,
-			0.5 * (1 - (embedding <=> $1)) +
-			0.5 * COALESCE((
-				SELECT COALESCE(MAX(ts_rank_cd(
-					to_tsvector('english', COALESCE(c.text_content, '')),
-					plainto_tsquery('english', $4), 32
-				)), 0)
-				FROM files c
-				WHERE c.path = files.path
-				AND c.deleted_at IS NULL
-			), 0) AS score,
-			indexed_at,
-			file_modified_at
-		FROM files
-		WHERE deleted_at IS NULL
-			AND canonical_path IS NULL
-			AND embedding IS NOT NULL
-		
-	`
-
 	args := []any{v, q.Limit, q.Offset}
 	idx := 4
 
-	fmt.Printf("DEBUG: q.Query=%q len=%d\n", q.Query, len(q.Query))
-	// if hybrid, $4 is the query string — add it and advance idx
+	var innerWhere string
+
 	if q.Query != "" {
-		args = append(args, q.Query)
+		args = append(args, q.Query) // $4
 		idx = 5
+		innerWhere = `
+        SELECT DISTINCT ON (path)
+            path, modality, file_ext, size,
+            0.5 * (1 - (embedding <=> $1)) +
+			0.5 * CASE
+				WHEN COALESCE((
+					SELECT MAX(ts_rank(
+						to_tsvector('english', COALESCE(c.text_content, '')),
+						plainto_tsquery('english', $4)
+					))
+					FROM files c
+					WHERE c.path = files.path
+					AND c.deleted_at IS NULL
+				), 0) = 0 THEN 0.0
+				ELSE GREATEST(
+					0.3,  -- minimum bonus for any match
+					COALESCE((
+						SELECT MAX(ts_rank(
+							to_tsvector('english', COALESCE(c.text_content, '')),
+							plainto_tsquery('english', $4)
+						))
+						FROM files c
+						WHERE c.path = files.path
+						AND c.deleted_at IS NULL
+					), 0) * 10  -- scale up ts_rank values
+				)
+			END AS score,
+            indexed_at, file_modified_at
+        FROM files
+        WHERE deleted_at IS NULL
+          AND (canonical_path IS NULL OR canonical_path = '')
+          AND embedding IS NOT NULL`
+	} else {
+		innerWhere = `
+        SELECT DISTINCT ON (path)
+            path, modality, file_ext, size,
+            1 - (embedding <=> $1) AS score,
+            indexed_at, file_modified_at
+        FROM files
+        WHERE deleted_at IS NULL
+          AND (canonical_path IS NULL OR canonical_path = '')
+          AND embedding IS NOT NULL`
 	}
 
+	innerOrder := " ORDER BY path, embedding <=> $1"
+
 	if q.Modality != "" {
-		inner += fmt.Sprintf(" AND modality = $%d", idx)
+		innerWhere += fmt.Sprintf(" AND modality = $%d", idx)
 		args = append(args, q.Modality)
 		idx++
 	}
 	if q.Ext != "" {
-		inner += fmt.Sprintf(" AND file_ext = $%d", idx)
+		innerWhere += fmt.Sprintf(" AND file_ext = $%d", idx)
 		args = append(args, q.Ext)
 		idx++
 	}
 	if q.Source != "" {
-		inner += fmt.Sprintf(" AND source = $%d", idx)
+		innerWhere += fmt.Sprintf(" AND source = $%d", idx)
 		args = append(args, q.Source)
 		idx++
 	}
 	if q.Since != nil {
-		inner += fmt.Sprintf(" AND file_modified_at >= $%d", idx)
+		innerWhere += fmt.Sprintf(" AND file_modified_at >= $%d", idx)
 		args = append(args, q.Since)
 		idx++
 	}
 	if q.Before != nil {
-		inner += fmt.Sprintf(" AND file_modified_at <= $%d", idx)
+		innerWhere += fmt.Sprintf(" AND file_modified_at <= $%d", idx)
 		args = append(args, q.Before)
 		idx++
 	}
 	if q.MinSize != nil {
-		inner += fmt.Sprintf(" AND size >= $%d", idx)
+		innerWhere += fmt.Sprintf(" AND size >= $%d", idx)
 		args = append(args, q.MinSize)
 		idx++
 	}
 	if q.MaxSize != nil {
-		inner += fmt.Sprintf(" AND size <= $%d", idx)
+		innerWhere += fmt.Sprintf(" AND size <= $%d", idx)
 		args = append(args, q.MaxSize)
 		idx++
 	}
 	if q.MinScore != nil {
-		inner += fmt.Sprintf(" AND 1 - (%s <=> $1) >= $%d", embeddingCol, idx)
+		innerWhere += fmt.Sprintf(" AND 1 - (%s <=> $1) >= $%d", embeddingCol, idx)
 		args = append(args, q.MinScore)
 		idx++
 	}
 
 	// DISTINCT ON requires ORDER BY to start with the distinct expression
 	// then the similarity — this picks the best chunk per path
-	inner += fmt.Sprintf(" ORDER BY path, %s <=> $1", embeddingCol)
+	inner := innerWhere + innerOrder
 
 	// wrap in outer query to apply limit/offset after deduplication
 	// and re-sort by score descending
@@ -151,5 +170,6 @@ func Search(ctx context.Context, conn *pgx.Conn, q SearchQuery) ([]SearchResult,
 		}
 		results = append(results, r)
 	}
+
 	return results, rows.Err()
 }
