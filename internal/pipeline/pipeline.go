@@ -133,6 +133,7 @@ func processTextChunk(ctx context.Context, cfg Config, fi fsindex.FileInfo, text
 		EmbedModel:     cfg.EmbedModel,
 		Embedding:      vectors[0],
 		ChunkIndex:     chunkIndex,
+		TextContent:    &text,
 	}, nil
 }
 

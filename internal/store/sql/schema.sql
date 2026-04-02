@@ -27,6 +27,9 @@ CREATE TABLE IF NOT EXISTS files (
     -- rich metadata (EXIF, page count, dimensions, etc.)
     metadata          JSONB,
 
+    -- raw extracted text
+    text_content      TEXT,
+
     -- housekeeping
     indexed_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
     deleted_at        TIMESTAMPTZ

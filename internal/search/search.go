@@ -24,6 +24,7 @@ type SearchResult struct {
 // SearchQuery holds all search parameters.
 // Only Vector and Limit are required — all other fields are optional filters.
 type SearchQuery struct {
+	Query  string
 	Vector []float32
 	Limit  int
 	Offset int
@@ -42,26 +43,42 @@ type SearchQuery struct {
 // Search performs a cosine similarity search against live, canonical files.
 func Search(ctx context.Context, conn *pgx.Conn, q SearchQuery) ([]SearchResult, error) {
 	v := pgvector.NewVector(q.Vector)
-
 	embeddingCol := "embedding"
 
-	inner := fmt.Sprintf(`
+	inner := `
 		SELECT DISTINCT ON (path)
 			path,
 			modality,
 			file_ext,
 			size,
-			1 - (%s <=> $1) AS score,
+			0.5 * (1 - (embedding <=> $1)) +
+			0.5 * COALESCE((
+				SELECT COALESCE(MAX(ts_rank_cd(
+					to_tsvector('english', COALESCE(c.text_content, '')),
+					plainto_tsquery('english', $4), 32
+				)), 0)
+				FROM files c
+				WHERE c.path = files.path
+				AND c.deleted_at IS NULL
+			), 0) AS score,
 			indexed_at,
 			file_modified_at
 		FROM files
 		WHERE deleted_at IS NULL
-		  AND canonical_path IS NULL
-		  AND %s IS NOT NULL
-	`, embeddingCol, embeddingCol)
+			AND canonical_path IS NULL
+			AND embedding IS NOT NULL
+		
+	`
 
 	args := []any{v, q.Limit, q.Offset}
 	idx := 4
+
+	fmt.Printf("DEBUG: q.Query=%q len=%d\n", q.Query, len(q.Query))
+	// if hybrid, $4 is the query string — add it and advance idx
+	if q.Query != "" {
+		args = append(args, q.Query)
+		idx = 5
+	}
 
 	if q.Modality != "" {
 		inner += fmt.Sprintf(" AND modality = $%d", idx)
