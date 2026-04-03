@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"github.com/bjluckow/fsvector/internal/store"
+	"github.com/bjluckow/fsvector/pkg/api"
+	"github.com/pgvector/pgvector-go"
 )
 
 // ListFile is a single row returned by List.
@@ -103,4 +105,145 @@ func List(ctx context.Context, db store.Querier, q ListQuery) ([]ListFile, error
 		files = append(files, f)
 	}
 	return files, rows.Err()
+}
+
+// Export returns full file rows including embeddings, using the same
+// filters as List. Used for cross-instance sync and plugin data access.
+// WARNING: Can be extremely memory intensive without streaming, use ExportStream instead
+func Export(ctx context.Context, db store.Querier, q ListQuery) ([]api.ExportRow, error) {
+	sql := `
+		SELECT
+			path, source, modality, file_ext, mime_type,
+			embed_model, embedding, chunk_index, chunk_type,
+			text_content, metadata, indexed_at, file_modified_at
+		FROM files
+		WHERE (canonical_path IS NULL OR canonical_path = '')
+	`
+
+	args := []any{}
+	idx := 1
+
+	if !q.IncludeDeleted {
+		sql += " AND deleted_at IS NULL"
+	}
+	if q.Modality != "" {
+		sql += fmt.Sprintf(" AND modality = $%d", idx)
+		args = append(args, q.Modality)
+		idx++
+	}
+	if q.Ext != "" {
+		sql += fmt.Sprintf(" AND file_ext = $%d", idx)
+		args = append(args, q.Ext)
+		idx++
+	}
+	if q.Source != "" {
+		sql += fmt.Sprintf(" AND source = $%d", idx)
+		args = append(args, q.Source)
+		idx++
+	}
+	if q.Since != nil {
+		sql += fmt.Sprintf(" AND file_modified_at >= $%d", idx)
+		args = append(args, q.Since)
+		idx++
+	}
+	if q.Before != nil {
+		sql += fmt.Sprintf(" AND file_modified_at <= $%d", idx)
+		args = append(args, q.Before)
+		idx++
+	}
+
+	sql += " ORDER BY path, chunk_index"
+
+	// no LIMIT for export — stream everything
+	rows, err := db.Query(ctx, sql, args...)
+	if err != nil {
+		return nil, fmt.Errorf("export: %w", err)
+	}
+	defer rows.Close()
+
+	var result []api.ExportRow
+	for rows.Next() {
+		var r api.ExportRow
+		var embedding pgvector.Vector
+		if err := rows.Scan(
+			&r.Path, &r.Source, &r.Modality, &r.Ext, &r.MimeType,
+			&r.EmbedModel, &embedding, &r.ChunkIndex, &r.ChunkType,
+			&r.TextContent, &r.Metadata, &r.IndexedAt, &r.ModifiedAt,
+		); err != nil {
+			return nil, err
+		}
+		r.Embedding = embedding.Slice()
+		result = append(result, r)
+	}
+	return result, rows.Err()
+}
+
+// ExportStream calls fn for each matching row as it comes from postgres.
+// Never holds more than one row in memory at a time.
+func ExportStream(ctx context.Context, db store.Querier, q ListQuery, fn func(api.ExportRow) error) error {
+	sql := `
+		SELECT
+			path, source, modality, file_ext, mime_type,
+			embed_model, embedding, chunk_index, chunk_type,
+			text_content, metadata, indexed_at, file_modified_at
+		FROM files
+		WHERE (canonical_path IS NULL OR canonical_path = '')
+	`
+
+	args := []any{}
+	idx := 1
+
+	if !q.IncludeDeleted {
+		sql += " AND deleted_at IS NULL"
+	}
+	if q.Modality != "" {
+		sql += fmt.Sprintf(" AND modality = $%d", idx)
+		args = append(args, q.Modality)
+		idx++
+	}
+	if q.Ext != "" {
+		sql += fmt.Sprintf(" AND file_ext = $%d", idx)
+		args = append(args, q.Ext)
+		idx++
+	}
+	if q.Source != "" {
+		sql += fmt.Sprintf(" AND source = $%d", idx)
+		args = append(args, q.Source)
+		idx++
+	}
+	if q.Since != nil {
+		sql += fmt.Sprintf(" AND file_modified_at >= $%d", idx)
+		args = append(args, q.Since)
+		idx++
+	}
+	if q.Before != nil {
+		sql += fmt.Sprintf(" AND file_modified_at <= $%d", idx)
+		args = append(args, q.Before)
+		idx++
+	}
+
+	sql += " ORDER BY path, chunk_index"
+
+	rows, err := db.Query(ctx, sql, args...)
+	if err != nil {
+		return fmt.Errorf("export: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var r api.ExportRow
+		var embedding pgvector.Vector
+		if err := rows.Scan(
+			&r.Path, &r.Source, &r.Modality, &r.Ext, &r.MimeType,
+			&r.EmbedModel, &embedding, &r.ChunkIndex, &r.ChunkType,
+			&r.TextContent, &r.Metadata, &r.IndexedAt, &r.ModifiedAt,
+		); err != nil {
+			return err
+		}
+		r.Embedding = embedding.Slice()
+		if err := fn(r); err != nil {
+			return err
+		}
+	}
+	return rows.Err()
 }
