@@ -20,16 +20,18 @@ import (
 type Server struct {
 	pool        store.Querier
 	embedClient *embed.Client
+	searchCfg   search.SearchConfig
 	progress    *Progress
 	trigger     chan struct{}
 	started     time.Time
 	sourceURI   string
 }
 
-func newServer(pool store.Querier, embedClient *embed.Client, progress *Progress, trigger chan struct{}, sourceURI string) *Server {
+func newServer(pool store.Querier, embedClient *embed.Client, progress *Progress, trigger chan struct{}, sourceURI string, searchCfg search.SearchConfig) *Server {
 	return &Server{
 		pool:        pool,
 		embedClient: embedClient,
+		searchCfg:   searchCfg,
 		progress:    progress,
 		trigger:     trigger,
 		started:     time.Now(),
@@ -131,9 +133,23 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	cfg := s.searchCfg
+
+	// override search config
+	if req.FTSWeight > 0 {
+		cfg.FTSWeight = req.FTSWeight
+	}
+
+	mode := search.SearchMode(req.Mode)
+	if mode == "" {
+		mode = cfg.DefaultMode
+	}
+
 	// build search query
 	q := search.SearchQuery{
 		Query:  req.Query,
+		Mode:   mode,
+		Config: cfg,
 		Vector: vectors[0],
 		Limit:  req.Limit,
 		Offset: (req.Page - 1) * req.Limit,

@@ -9,23 +9,41 @@ import (
 	"github.com/pgvector/pgvector-go"
 )
 
-// SearchResult is a single result from a similarity search.
-type SearchResult struct {
-	Path       string
-	Modality   string
-	FileExt    string
-	Size       int64
-	Score      float64
-	NormScore  float64 // populated by Normalize()
-	IndexedAt  time.Time
-	ModifiedAt *time.Time
+type SearchMode string
+
+const (
+	SearchModeHybrid   SearchMode = "hybrid"
+	SearchModeVector   SearchMode = "vector"
+	SearchModeFullText SearchMode = "fulltext"
+)
+
+// SearchConfig holds tunable search parameters.
+// Loaded once from config, optionally overridden per-request.
+type SearchConfig struct {
+	FTSWeight   float64
+	FTSScale    float64
+	FTSMinBoost float64
+	DefaultMode SearchMode
+}
+
+func (c SearchConfig) SemanticWeight() float64 {
+	return 1.0 - c.FTSWeight
+}
+
+var DefaultSearchConfig = SearchConfig{
+	FTSWeight:   0.5,
+	FTSScale:    10.0,
+	FTSMinBoost: 0.3,
+	DefaultMode: SearchModeHybrid,
 }
 
 // SearchQuery holds all search parameters.
-// Only Vector and Limit are required — all other fields are optional filters.
 type SearchQuery struct {
 	Query  string
 	Vector []float32
+	Mode   SearchMode
+	Config SearchConfig
+
 	Limit  int
 	Offset int
 
@@ -40,112 +58,226 @@ type SearchQuery struct {
 	MinScore *float64
 }
 
-// Search performs a cosine similarity search against live, canonical files.
-func Search(ctx context.Context, db store.Querier, q SearchQuery) ([]SearchResult, error) {
-	v := pgvector.NewVector(q.Vector)
-	embeddingCol := "embedding"
+// SearchResult is a single result from a similarity search.
+type SearchResult struct {
+	Path       string
+	Modality   string
+	FileExt    string
+	Size       int64
+	Score      float64
+	NormScore  float64 // populated by Normalize()
+	IndexedAt  time.Time
+	ModifiedAt *time.Time
+}
 
+// Search performs a search against live canonical files.
+func Search(ctx context.Context, db store.Querier, q SearchQuery) ([]SearchResult, error) {
+	// apply defaults
+	if q.Mode == "" {
+		q.Mode = q.Config.DefaultMode
+	}
+	if q.Mode == "" {
+		q.Mode = SearchModeHybrid
+	}
+	if q.Limit == 0 {
+		q.Limit = 10
+	}
+
+	switch q.Mode {
+	case SearchModeVector:
+		return searchVector(ctx, db, q)
+	case SearchModeFullText:
+		return searchFullText(ctx, db, q)
+	default:
+		return searchHybrid(ctx, db, q)
+	}
+}
+
+// searchVector performs pure cosine similarity search.
+// No FTS component — fastest mode, best for image search and
+// queries where keyword matching is not needed.
+func searchVector(ctx context.Context, db store.Querier, q SearchQuery) ([]SearchResult, error) {
+	v := pgvector.NewVector(q.Vector)
+
+	// $1=vector $2=limit $3=offset
 	args := []any{v, q.Limit, q.Offset}
 	idx := 4
 
-	var innerWhere string
+	where := `
+		WHERE deleted_at IS NULL
+		  AND (canonical_path IS NULL OR canonical_path = '')
+		  AND embedding IS NOT NULL`
 
-	if q.Query != "" {
-		args = append(args, q.Query) // $4
-		idx = 5
-		innerWhere = `
-        SELECT DISTINCT ON (path)
-            path, modality, file_ext, size,
-            0.5 * (1 - (embedding <=> $1)) +
-			0.5 * CASE
-				WHEN COALESCE((
-					SELECT MAX(ts_rank(
-						to_tsvector('english', COALESCE(c.text_content, '')),
-						plainto_tsquery('english', $4)
-					))
-					FROM files c
-					WHERE c.path = files.path
-					AND c.deleted_at IS NULL
-				), 0) = 0 THEN 0.0
-				ELSE GREATEST(
-					0.3,  -- minimum bonus for any match
-					COALESCE((
-						SELECT MAX(ts_rank(
-							to_tsvector('english', COALESCE(c.text_content, '')),
-							plainto_tsquery('english', $4)
-						))
-						FROM files c
-						WHERE c.path = files.path
-						AND c.deleted_at IS NULL
-					), 0) * 10  -- scale up ts_rank values
-				)
-			END AS score,
-            indexed_at, file_modified_at
-        FROM files
-        WHERE deleted_at IS NULL
-          AND (canonical_path IS NULL OR canonical_path = '')
-          AND embedding IS NOT NULL`
-	} else {
-		innerWhere = `
-        SELECT DISTINCT ON (path)
-            path, modality, file_ext, size,
-            1 - (embedding <=> $1) AS score,
-            indexed_at, file_modified_at
-        FROM files
-        WHERE deleted_at IS NULL
-          AND (canonical_path IS NULL OR canonical_path = '')
-          AND embedding IS NOT NULL`
+	where, args, idx = applyFilters(where, args, idx, q)
+
+	inner := fmt.Sprintf(`
+		SELECT DISTINCT ON (path)
+			path, modality, file_ext, size,
+			1 - (embedding <=> $1) AS score,
+			indexed_at, file_modified_at
+		FROM files
+		%s
+		ORDER BY path, embedding <=> $1`, where)
+
+	return runSearch(ctx, db, inner, args)
+}
+
+// searchFullText performs FTS-only search.
+// No vector component — useful for exact keyword searches.
+// Does not require an embedding vector.
+func searchFullText(ctx context.Context, db store.Querier, q SearchQuery) ([]SearchResult, error) {
+	if q.Query == "" {
+		return nil, fmt.Errorf("fulltext search requires a query string")
 	}
 
-	innerOrder := " ORDER BY path, embedding <=> $1"
+	cfg := q.Config
+	if cfg.FTSScale == 0 {
+		cfg = DefaultSearchConfig
+	}
 
+	// $1=query $2=limit $3=offset
+	args := []any{q.Query, q.Limit, q.Offset}
+	idx := 4
+
+	where := `
+		WHERE deleted_at IS NULL
+		  AND (canonical_path IS NULL OR canonical_path = '')
+		  AND text_content IS NOT NULL`
+
+	where, args, idx = applyFilters(where, args, idx, q)
+
+	inner := fmt.Sprintf(`
+		SELECT DISTINCT ON (path)
+			path, modality, file_ext, size,
+			LEAST(1.0, COALESCE((
+				SELECT MAX(ts_rank(
+					to_tsvector('english', COALESCE(c.text_content, '')),
+					plainto_tsquery('english', $1)
+				)) * %f
+				FROM files c
+				WHERE c.path = files.path
+				  AND c.deleted_at IS NULL
+			), 0)) AS score,
+			indexed_at, file_modified_at
+		FROM files
+		%s
+		ORDER BY path, text_content IS NULL, ts_rank(
+			to_tsvector('english', COALESCE(text_content, '')),
+			plainto_tsquery('english', $1)
+		) DESC`, cfg.FTSScale, where)
+
+	return runSearch(ctx, db, inner, args)
+}
+
+// searchHybrid combines cosine similarity with FTS.
+// Default mode — best for general text queries.
+func searchHybrid(ctx context.Context, db store.Querier, q SearchQuery) ([]SearchResult, error) {
+	v := pgvector.NewVector(q.Vector)
+
+	cfg := q.Config
+	if cfg.FTSScale == 0 {
+		cfg = DefaultSearchConfig
+	}
+
+	// $1=vector $2=limit $3=offset $4=query
+	args := []any{v, q.Limit, q.Offset, q.Query}
+	idx := 5
+
+	where := `
+		WHERE deleted_at IS NULL
+		  AND (canonical_path IS NULL OR canonical_path = '')
+		  AND embedding IS NOT NULL`
+
+	where, args, idx = applyFilters(where, args, idx, q)
+
+	ftsSubquery := `
+		COALESCE((
+			SELECT MAX(ts_rank(
+				to_tsvector('english', COALESCE(c.text_content, '')),
+				plainto_tsquery('english', $4)
+			))
+			FROM files c
+			WHERE c.path = files.path
+			  AND c.deleted_at IS NULL
+		), 0)`
+
+	scoreExpr := fmt.Sprintf(`
+		LEAST(1.0,
+			%f * (1 - (embedding <=> $1)) +
+			%f * CASE
+				WHEN %s = 0 THEN 0.0
+				ELSE GREATEST(%f, LEAST(1.0, %s * %f))
+			END
+		)`,
+		cfg.SemanticWeight(),
+		cfg.FTSWeight,
+		ftsSubquery,
+		cfg.FTSMinBoost,
+		ftsSubquery,
+		cfg.FTSScale,
+	)
+
+	inner := fmt.Sprintf(`
+		SELECT DISTINCT ON (path)
+			path, modality, file_ext, size,
+			%s AS score,
+			indexed_at, file_modified_at
+		FROM files
+		%s
+		ORDER BY path, embedding <=> $1`, scoreExpr, where)
+
+	return runSearch(ctx, db, inner, args)
+}
+
+// applyFilters appends WHERE clauses for optional filters.
+// Returns updated where string, args slice, and next param index.
+func applyFilters(where string, args []any, idx int, q SearchQuery) (string, []any, int) {
 	if q.Modality != "" {
-		innerWhere += fmt.Sprintf(" AND modality = $%d", idx)
+		where += fmt.Sprintf(" AND modality = $%d", idx)
 		args = append(args, q.Modality)
 		idx++
 	}
 	if q.Ext != "" {
-		innerWhere += fmt.Sprintf(" AND file_ext = $%d", idx)
+		where += fmt.Sprintf(" AND file_ext = $%d", idx)
 		args = append(args, q.Ext)
 		idx++
 	}
 	if q.Source != "" {
-		innerWhere += fmt.Sprintf(" AND source = $%d", idx)
+		where += fmt.Sprintf(" AND source = $%d", idx)
 		args = append(args, q.Source)
 		idx++
 	}
 	if q.Since != nil {
-		innerWhere += fmt.Sprintf(" AND file_modified_at >= $%d", idx)
+		where += fmt.Sprintf(" AND file_modified_at >= $%d", idx)
 		args = append(args, q.Since)
 		idx++
 	}
 	if q.Before != nil {
-		innerWhere += fmt.Sprintf(" AND file_modified_at <= $%d", idx)
+		where += fmt.Sprintf(" AND file_modified_at <= $%d", idx)
 		args = append(args, q.Before)
 		idx++
 	}
 	if q.MinSize != nil {
-		innerWhere += fmt.Sprintf(" AND size >= $%d", idx)
+		where += fmt.Sprintf(" AND size >= $%d", idx)
 		args = append(args, q.MinSize)
 		idx++
 	}
 	if q.MaxSize != nil {
-		innerWhere += fmt.Sprintf(" AND size <= $%d", idx)
+		where += fmt.Sprintf(" AND size <= $%d", idx)
 		args = append(args, q.MaxSize)
 		idx++
 	}
 	if q.MinScore != nil {
-		innerWhere += fmt.Sprintf(" AND 1 - (%s <=> $1) >= $%d", embeddingCol, idx)
+		where += fmt.Sprintf(" AND 1 - (embedding <=> $1) >= $%d", idx)
 		args = append(args, q.MinScore)
 		idx++
 	}
+	return where, args, idx
+}
 
-	// DISTINCT ON requires ORDER BY to start with the distinct expression
-	// then the similarity — this picks the best chunk per path
-	inner := innerWhere + innerOrder
-
-	// wrap in outer query to apply limit/offset after deduplication
-	// and re-sort by score descending
+// runSearch wraps an inner DISTINCT ON query with pagination
+// and scans results.
+func runSearch(ctx context.Context, db store.Querier, inner string, args []any) ([]SearchResult, error) {
 	sql := fmt.Sprintf(`
 		SELECT path, modality, file_ext, size, score, indexed_at, file_modified_at
 		FROM (%s) deduped
@@ -170,6 +302,5 @@ func Search(ctx context.Context, db store.Querier, q SearchQuery) ([]SearchResul
 		}
 		results = append(results, r)
 	}
-
 	return results, rows.Err()
 }

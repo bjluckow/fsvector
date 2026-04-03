@@ -3,17 +3,20 @@ package api
 import "time"
 
 type SearchRequest struct {
-	Query    string  `json:"query"`
-	Modality string  `json:"modality"`
-	Ext      string  `json:"ext"`
-	Source   string  `json:"source"`
-	Since    string  `json:"since"`
-	Before   string  `json:"before"`
-	MinSize  string  `json:"min_size"`
-	MaxSize  string  `json:"max_size"`
-	MinScore float64 `json:"min_score"`
-	Limit    int     `json:"limit"`
-	Page     int     `json:"page"`
+	Query          string  `json:"query"`
+	Mode           string  `json:"mode"`            // hybrid | vector | fulltext
+	SemanticWeight float64 `json:"semantic_weight"` // 0 = use server default
+	FTSWeight      float64 `json:"fts_weight"`
+	Modality       string  `json:"modality"`
+	Ext            string  `json:"ext"`
+	Source         string  `json:"source"`
+	Since          string  `json:"since"`
+	Before         string  `json:"before"`
+	MinSize        string  `json:"min_size"`
+	MaxSize        string  `json:"max_size"`
+	MinScore       float64 `json:"min_score"`
+	Limit          int     `json:"limit"`
+	Page           int     `json:"page"`
 }
 
 type SearchResult struct {

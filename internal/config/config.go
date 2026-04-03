@@ -43,6 +43,12 @@ type Config struct {
 	// Daemon
 	DaemonPort  int
 	WorkerCount int
+
+	// Search
+	SearchFTSWeight   float64
+	SearchFTSScale    float64
+	SearchFTSMinBoost float64
+	SearchDefaultMode string
 }
 
 func Load() (*Config, error) {
@@ -76,6 +82,10 @@ func Load() (*Config, error) {
 	viper.SetDefault("source.large_file_threshold", 104857600)
 	viper.SetDefault("daemon.port", 8080)
 	viper.SetDefault("daemon.worker_count", 4)
+	viper.SetDefault("search.fts_weight", 0.5)
+	viper.SetDefault("search.fts_scale", 10.0)
+	viper.SetDefault("search.fts_min_boost", 0.3)
+	viper.SetDefault("search.default_mode", "hybrid")
 
 	// bind custom env vars
 	viper.BindEnv("source.s3_bucket", "AWS_BUCKET_NAME")
@@ -109,5 +119,9 @@ func Load() (*Config, error) {
 		LargeFileThreshold: viper.GetInt64("source.large_file_threshold"),
 		DaemonPort:         viper.GetInt("daemon.port"),
 		WorkerCount:        viper.GetInt("daemon.worker_count"),
+		SearchFTSWeight:    viper.GetFloat64("search.fts_weight"),
+		SearchFTSScale:     viper.GetFloat64("search.fts_scale"),
+		SearchFTSMinBoost:  viper.GetFloat64("search.fts_min_boost"),
+		SearchDefaultMode:  viper.GetString("search.default_mode"),
 	}, nil
 }

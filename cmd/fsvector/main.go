@@ -50,6 +50,7 @@ func client() *api.Client {
 // ── search ───────────────────────────────────────────────────────────────────
 
 var (
+	searchMode     string
 	searchModality string
 	searchExt      string
 	searchSource   string
@@ -70,6 +71,7 @@ var searchCmd = &cobra.Command{
 		ctx := context.Background()
 		resp, err := client().Search(ctx, api.SearchRequest{
 			Query:    args[0],
+			Mode:     searchMode,
 			Modality: searchModality,
 			Ext:      searchExt,
 			Source:   searchSource,
@@ -98,6 +100,7 @@ var searchCmd = &cobra.Command{
 }
 
 func init() {
+	searchCmd.Flags().StringVar(&searchMode, "mode", "", "search mode: hybrid (default), vector, fulltext")
 	searchCmd.Flags().StringVarP(&searchModality, "modality", "m", "", "filter by modality (text, image, audio, video)")
 	searchCmd.Flags().StringVar(&searchExt, "ext", "", "filter by file extension")
 	searchCmd.Flags().StringVar(&searchSource, "source", "", "filter by source")
