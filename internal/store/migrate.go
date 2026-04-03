@@ -14,9 +14,9 @@ var schemaTmpl string
 
 // Migrate applies the schema to the database, substituting the embedding
 // dimension. It is idempotent — safe to call on every startup.
-func Migrate(ctx context.Context, q Querier, dim int) error {
+func Migrate(ctx context.Context, db Querier, dim int) error {
 	schema := strings.ReplaceAll(schemaTmpl, "%%EMBEDDING_DIM%%", fmt.Sprintf("%d", dim))
-	_, err := q.Exec(ctx, schema)
+	_, err := db.Exec(ctx, schema)
 	if err != nil {
 		return fmt.Errorf("migrate: %w", err)
 	}
@@ -25,9 +25,9 @@ func Migrate(ctx context.Context, q Querier, dim int) error {
 
 // EmbeddingDim returns the current vector dimension of the files table,
 // or 0 if the table does not exist yet.
-func EmbeddingDim(ctx context.Context, q Querier) (int, error) {
+func EmbeddingDim(ctx context.Context, db Querier) (int, error) {
 	var dim int
-	err := q.QueryRow(ctx, `
+	err := db.QueryRow(ctx, `
 		SELECT atttypmod
 		FROM pg_attribute
 		WHERE attrelid = 'files'::regclass

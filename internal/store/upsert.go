@@ -32,14 +32,14 @@ type File struct {
 
 // Upsert inserts or updates a file row, including its embedding.
 // Matches on (path, chunk_index).
-func Upsert(ctx context.Context, q Querier, f File) error {
+func Upsert(ctx context.Context, db Querier, f File) error {
 	var embedding *pgvector.Vector
 	if f.Embedding != nil {
 		v := pgvector.NewVector(f.Embedding)
 		embedding = &v
 	}
 
-	_, err := q.Exec(ctx, `
+	_, err := db.Exec(ctx, `
 		INSERT INTO files (
 			path, source, canonical_path,
 			content_hash, size, mime_type, modality,
@@ -86,9 +86,9 @@ func Upsert(ctx context.Context, q Querier, f File) error {
 
 // FindByHash returns the canonical path for a given content hash, if one exists.
 // Used for deduplication — if a hash is already indexed, the new file is a duplicate.
-func FindByHash(ctx context.Context, q Querier, hash string) (string, bool, error) {
+func FindByHash(ctx context.Context, db Querier, hash string) (string, bool, error) {
 	var path string
-	err := q.QueryRow(ctx, `
+	err := db.QueryRow(ctx, `
 		SELECT path FROM files
 		WHERE content_hash = $1
 		  AND canonical_path IS NULL
@@ -107,8 +107,8 @@ func FindByHash(ctx context.Context, q Querier, hash string) (string, bool, erro
 
 // UpsertDuplicate inserts a file row that points to an existing canonical path.
 // No embedding is stored — the canonical row owns the vector.
-func UpsertDuplicate(ctx context.Context, q Querier, f File, canonicalPath string) error {
-	_, err := q.Exec(ctx, `
+func UpsertDuplicate(ctx context.Context, db Querier, f File, canonicalPath string) error {
+	_, err := db.Exec(ctx, `
 		INSERT INTO files (
 			path, source, canonical_path,
 			content_hash, size, mime_type, modality,

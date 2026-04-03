@@ -24,6 +24,7 @@ type Config struct {
 	VisionSvcURL     string
 
 	// Daemon
+	DaemonPort   int
 	WatchPath    string
 	EmbedModel   string
 	Source       string // "local" or "s3://bucket/prefix"
@@ -45,6 +46,7 @@ func Load() (*Config, error) {
 		ConvertSvcURL:    env("CONVERTSVC_URL", "http://convertd:8001"),
 		TranscribeSvcURL: env("TRANSCRIBESVC_URL", "http://transcribesvc:8002"),
 		VisionSvcURL:     env("VISIONSVC_URL", "http://visionsvc:8003"),
+		DaemonPort:       envInt("DAEMON_PORT", 8080),
 		WatchPath:        env("WATCH_PATH", "/data/source"),
 		EmbedModel:       env("EMBED_MODEL", "sentence-transformers/all-MiniLM-L6-v2"),
 		Source:           env("SOURCE", "local"),
