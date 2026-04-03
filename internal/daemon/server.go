@@ -24,12 +24,12 @@ type Server struct {
 	embedClient *embed.Client
 	searchCfg   search.SearchConfig
 	progress    *Progress
-	trigger     chan struct{}
+	trigger     chan bool
 	started     time.Time
 	sourceURI   string
 }
 
-func newServer(pool store.Querier, embedClient *embed.Client, progress *Progress, trigger chan struct{}, sourceURI string, searchCfg search.SearchConfig) *Server {
+func newServer(pool store.Querier, embedClient *embed.Client, progress *Progress, trigger chan bool, sourceURI string, searchCfg search.SearchConfig) *Server {
 	return &Server{
 		pool:        pool,
 		embedClient: embedClient,
@@ -94,8 +94,11 @@ func (s *Server) handleReindex(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+
+	purge := r.URL.Query().Get("purge") == "true"
+
 	select {
-	case s.trigger <- struct{}{}:
+	case s.trigger <- purge:
 		json.NewEncoder(w).Encode(map[string]string{"status": "triggered"})
 	default:
 		json.NewEncoder(w).Encode(map[string]string{"status": "already running"})
@@ -371,7 +374,9 @@ func (s *Server) handleFileDetail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	f, err := query.Show(r.Context(), s.pool, path)
+	includeDeleted := r.URL.Query().Get("include_deleted") == "true"
+
+	f, err := query.Show(r.Context(), s.pool, path, includeDeleted)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return

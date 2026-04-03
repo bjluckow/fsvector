@@ -27,9 +27,10 @@ type ShowFile struct {
 }
 
 // Show returns detailed metadata for a single file path.
-func Show(ctx context.Context, db store.Querier, path string) (*ShowFile, error) {
+func Show(ctx context.Context, db store.Querier, path string, inclDeleted bool) (*ShowFile, error) {
 	var f ShowFile
-	err := db.QueryRow(ctx, `
+
+	sql := `
 		SELECT
 			path,
 			source,
@@ -46,8 +47,15 @@ func Show(ctx context.Context, db store.Querier, path string) (*ShowFile, error)
 			deleted_at
 		FROM files
 		WHERE path = $1
-		  AND chunk_index = 0
-	`, path).Scan(
+		  AND chunk_index = 0`
+
+	if !inclDeleted {
+		sql += " AND deleted_at IS NULL"
+	}
+
+	sql += " ORDER BY chunk_index"
+
+	err := db.QueryRow(ctx, sql, path).Scan(
 		&f.Path, &f.Source, &f.CanonicalPath,
 		&f.ContentHash, &f.Size, &f.MimeType,
 		&f.Modality, &f.FileExt, &f.EmbedModel,

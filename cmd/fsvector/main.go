@@ -200,13 +200,17 @@ func init() {
 
 // ── show ─────────────────────────────────────────────────────────────────────
 
+var (
+	showDeleted bool
+)
+
 var showCmd = &cobra.Command{
 	Use:   "show <path>",
 	Short: "Show metadata for a specific file",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
-		f, err := client().ShowFile(ctx, args[0])
+		f, err := client().ShowFile(ctx, args[0], showDeleted)
 		if err != nil {
 			return err
 		}
@@ -217,6 +221,10 @@ var showCmd = &cobra.Command{
 		fmt.Println(string(b))
 		return nil
 	},
+}
+
+func init() {
+	showCmd.Flags().BoolVar(&showDeleted, "deleted", false, "include soft-deleted files (not present in currently-watched directory)")
 }
 
 // ── stats ────────────────────────────────────────────────────────────────────
@@ -244,18 +252,27 @@ var statsCmd = &cobra.Command{
 
 // ── reindex ──────────────────────────────────────────────────────────────────
 
+var (
+	reindexPurge bool
+)
+
 var reindexCmd = &cobra.Command{
 	Use:   "reindex",
 	Short: "Trigger a full reindex on the daemon",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
-		resp, err := client().Reindex(ctx)
+		resp, err := client().Reindex(ctx, reindexPurge)
 		if err != nil {
 			return err
 		}
 		fmt.Println(resp.Status)
 		return nil
 	},
+}
+
+func init() {
+	reindexCmd.Flags().BoolVar(&reindexPurge, "purge", false,
+		"hard-delete soft-deleted files after reindex")
 }
 
 // ── status ───────────────────────────────────────────────────────────────────

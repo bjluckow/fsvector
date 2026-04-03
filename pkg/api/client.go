@@ -41,9 +41,14 @@ func (c *Client) Status(ctx context.Context) (*StatusResponse, error) {
 	return &r, nil
 }
 
-func (c *Client) Reindex(ctx context.Context) (*ReindexResponse, error) {
+func (c *Client) Reindex(ctx context.Context, purge bool) (*ReindexResponse, error) {
+	path := "/reindex"
+	if purge {
+		path += "?purge=true"
+	}
+
 	var r ReindexResponse
-	if err := c.postJSON(ctx, "/reindex", nil, &r); err != nil {
+	if err := c.postJSON(ctx, path, nil, &r); err != nil {
 		return nil, err
 	}
 	return &r, nil
@@ -145,9 +150,14 @@ func (c *Client) ListFiles(ctx context.Context, req ListRequest) (*ListResponse,
 	return &r, nil
 }
 
-func (c *Client) ShowFile(ctx context.Context, filePath string) (*FileDetail, error) {
+func (c *Client) ShowFile(ctx context.Context, filePath string, inclDeleted bool) (*FileDetail, error) {
 	params := url.Values{}
 	params.Set("path", filePath)
+
+	if inclDeleted {
+		params.Set("include_deleted", "true")
+	}
+
 	var r FileDetail
 	if err := c.getJSON(ctx, "/files?"+params.Encode(), &r); err != nil {
 		return nil, err
