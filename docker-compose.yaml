@@ -99,11 +99,13 @@ services:
       - ${SOURCE_DIR:-/tmp/fsvector-source}:/data/source:ro
     environment:
       DATABASE_URL: postgres://fsvector:fsvector@postgres:5432/fsvector
-      EMBEDSVC_URL: http://embedsvc:8000
-      CONVERTSVC_URL: http://convertsvc:8001
-      WATCH_PATH: /data/source
+      EMBED_URL: http://embedsvc:8000
+      CONVERT_URL: http://convertsvc:8001
+      TRANSCRIBE_URL: http://transcribesvc:8002
+      VISION_URL: http://visionsvc:8003
+      SOURCE_TYPE: local
+      SOURCE_WATCH_PATH: /data/source
       EMBED_MODEL: ${EMBED_MODEL:-clip-ViT-B-32}
-      SOURCE: ${SOURCE:-local}
     depends_on:
       postgres:
         condition: service_healthy

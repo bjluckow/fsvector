@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/jackc/pgx/v5"
+	"github.com/bjluckow/fsvector/internal/store"
 )
 
 // Stats holds index-wide statistics.
@@ -20,9 +20,9 @@ type Stats struct {
 }
 
 // GetStats returns aggregate statistics about the index.
-func GetStats(ctx context.Context, conn *pgx.Conn) (*Stats, error) {
+func GetStats(ctx context.Context, db store.Querier) (*Stats, error) {
 	var s Stats
-	err := conn.QueryRow(ctx, `
+	err := db.QueryRow(ctx, `
 		SELECT
 			COUNT(*) FILTER (WHERE chunk_index = 0)                            AS total,
 			COUNT(*) FILTER (WHERE deleted_at IS NOT NULL AND chunk_index = 0) AS deleted,

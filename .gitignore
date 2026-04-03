@@ -1,3 +1,10 @@
+# config
+fsvector.yml
+fsvector.yaml
+
+# allow examples
+!example/**
+
 # binaries
 bin/
 

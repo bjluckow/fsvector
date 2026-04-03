@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"text/tabwriter"
 	"time"
@@ -393,4 +395,29 @@ func init() {
 	daemonCmd.AddCommand(daemonStopCmd)
 	daemonCmd.AddCommand(daemonStatusCmd)
 	daemonCmd.AddCommand(daemonLogsCmd)
+}
+
+var daemonPort int
+
+var reindexCmd = &cobra.Command{
+	Use:   "reindex",
+	Short: "Trigger a full reindexing on the running daemon",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		resp, err := http.Post(
+			fmt.Sprintf("http://127.0.0.1:%d/reindex", daemonPort),
+			"application/json", nil)
+		if err != nil {
+			return fmt.Errorf("could not reach daemon: %w", err)
+		}
+		defer resp.Body.Close()
+		var result map[string]string
+		json.NewDecoder(resp.Body).Decode(&result)
+		fmt.Println(result["status"])
+		return nil
+	},
+}
+
+func init() {
+	reindexCmd.Flags().IntVar(&daemonPort, "daemon-port", 8080, "port fsvectord is listening on")
+	rootCmd.AddCommand(reindexCmd)
 }

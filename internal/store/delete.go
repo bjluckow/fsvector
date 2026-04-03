@@ -4,13 +4,11 @@ import (
 	"context"
 	"fmt"
 	"time"
-
-	"github.com/jackc/pgx/v5"
 )
 
 // SoftDelete marks all chunks for a given path as deleted.
-func SoftDelete(ctx context.Context, conn *pgx.Conn, path string) error {
-	_, err := conn.Exec(ctx, `
+func SoftDelete(ctx context.Context, db Querier, path string) error {
+	_, err := db.Exec(ctx, `
 		UPDATE files
 		SET deleted_at = $1
 		WHERE path = $2
@@ -23,8 +21,8 @@ func SoftDelete(ctx context.Context, conn *pgx.Conn, path string) error {
 }
 
 // UnDelete clears the deleted_at flag for all chunks of a given path.
-func UnDelete(ctx context.Context, conn *pgx.Conn, path string) error {
-	_, err := conn.Exec(ctx, `
+func UnDelete(ctx context.Context, db Querier, path string) error {
+	_, err := db.Exec(ctx, `
 		UPDATE files
 		SET deleted_at = NULL
 		WHERE path = $1
@@ -37,8 +35,8 @@ func UnDelete(ctx context.Context, conn *pgx.Conn, path string) error {
 
 // LivePaths returns the paths of all non-deleted, canonical files.
 // Used during startup reconciliation to diff against the filesystem.
-func LivePaths(ctx context.Context, conn *pgx.Conn) (map[string]string, error) {
-	rows, err := conn.Query(ctx, `
+func LivePaths(ctx context.Context, db Querier) (map[string]string, error) {
+	rows, err := db.Query(ctx, `
 		SELECT path, content_hash
 		FROM files
 		WHERE deleted_at IS NULL
@@ -65,8 +63,8 @@ func LivePaths(ctx context.Context, conn *pgx.Conn) (map[string]string, error) {
 // a given path and model. Called after re-indexing to clean up chunks
 // that no longer exist. This is a hard delete — stale chunks are index
 // artifacts, not filesystem deletions.
-func DeleteStaleChunks(ctx context.Context, conn *pgx.Conn, path, embedModel string, newChunkCount int) error {
-	_, err := conn.Exec(ctx, `
+func DeleteStaleChunks(ctx context.Context, db Querier, path, embedModel string, newChunkCount int) error {
+	_, err := db.Exec(ctx, `
 		DELETE FROM files
 		WHERE path = $1
 		  AND embed_model = $2

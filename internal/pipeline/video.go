@@ -8,12 +8,12 @@ import (
 
 	"github.com/bjluckow/fsvector/internal/chunk"
 	"github.com/bjluckow/fsvector/internal/clients/convert"
-	"github.com/bjluckow/fsvector/internal/fsindex"
+	"github.com/bjluckow/fsvector/internal/source"
 	"github.com/bjluckow/fsvector/internal/store"
 )
 
-func processVideo(ctx context.Context, cfg Config, fi fsindex.FileInfo) (Result, error) {
-	data, err := readFile(fi.Path)
+func processVideo(ctx context.Context, cfg Config, fi source.FileInfo) (Result, error) {
+	data, err := readFile(ctx, cfg, fi.Path)
 	if err != nil {
 		return Result{}, fmt.Errorf("read %s: %w", fi.Path, err)
 	}
@@ -52,7 +52,7 @@ func processVideo(ctx context.Context, cfg Config, fi fsindex.FileInfo) (Result,
 func processVideoFrame(
 	ctx context.Context,
 	cfg Config,
-	fi fsindex.FileInfo,
+	fi source.FileInfo,
 	frame convert.Frame,
 ) (store.File, error) {
 	vector, err := cfg.EmbedClient.EmbedImage(ctx, fi.Name, frame.Data)
@@ -93,7 +93,7 @@ func processVideoFrame(
 func processVideoAudio(
 	ctx context.Context,
 	cfg Config,
-	fi fsindex.FileInfo,
+	fi source.FileInfo,
 	videoData []byte,
 	chunkOffset int,
 ) []store.File {

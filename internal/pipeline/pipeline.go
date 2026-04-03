@@ -3,18 +3,18 @@ package pipeline
 import (
 	"context"
 	"fmt"
-	"os"
 
 	"github.com/bjluckow/fsvector/internal/clients/convert"
 	"github.com/bjluckow/fsvector/internal/clients/embed"
 	"github.com/bjluckow/fsvector/internal/clients/transcribe"
 	"github.com/bjluckow/fsvector/internal/clients/vision"
-	"github.com/bjluckow/fsvector/internal/fsindex"
+	"github.com/bjluckow/fsvector/internal/source"
 	"github.com/bjluckow/fsvector/internal/store"
 )
 
 // Config holds the dependencies for the pipeline.
 type Config struct {
+	Reader           source.FileReader
 	EmbedClient      *embed.Client
 	ConvertClient    *convert.Client
 	TranscribeClient *transcribe.Client
@@ -35,14 +35,13 @@ type Result struct {
 	SkipReason string
 }
 
-// readFile reads the full contents of a file.
-func readFile(path string) ([]byte, error) {
-	return os.ReadFile(path)
+func readFile(ctx context.Context, cfg Config, path string) ([]byte, error) {
+	return cfg.Reader.Read(ctx, path)
 }
 
 // Process runs a single FileInfo through the full pipeline:
 // detect modality → convert → embed → return store.File ready for upsert.
-func Process(ctx context.Context, cfg Config, fi fsindex.FileInfo) (Result, error) {
+func Process(ctx context.Context, cfg Config, fi source.FileInfo) (Result, error) {
 	if fi.Size < cfg.MinEmbedSize {
 		return Result{
 			Skipped:    true,
