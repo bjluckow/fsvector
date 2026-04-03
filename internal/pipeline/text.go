@@ -5,11 +5,11 @@ import (
 	"fmt"
 
 	"github.com/bjluckow/fsvector/internal/chunk"
-	"github.com/bjluckow/fsvector/internal/fsindex"
+	"github.com/bjluckow/fsvector/internal/source"
 	"github.com/bjluckow/fsvector/internal/store"
 )
 
-func processText(ctx context.Context, cfg Config, fi fsindex.FileInfo) (Result, error) {
+func processText(ctx context.Context, cfg Config, fi source.FileInfo) (Result, error) {
 	data, err := readFile(ctx, cfg, fi.Path)
 	if err != nil {
 		return Result{}, fmt.Errorf("read %s: %w", fi.Path, err)
@@ -65,7 +65,7 @@ func processText(ctx context.Context, cfg Config, fi fsindex.FileInfo) (Result, 
 
 // processTextChunk embeds a single text chunk and returns a store.File.
 // Returns nil if the embed service returns no vectors.
-func processTextChunk(ctx context.Context, cfg Config, fi fsindex.FileInfo, text string, chunkIndex int) (*store.File, error) {
+func processTextChunk(ctx context.Context, cfg Config, fi source.FileInfo, text string, chunkIndex int) (*store.File, error) {
 	vectors, err := cfg.EmbedClient.EmbedTexts(ctx, []string{text})
 	if err != nil {
 		return nil, fmt.Errorf("embed: %w", err)

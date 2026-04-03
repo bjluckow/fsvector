@@ -7,11 +7,11 @@ import (
 	"strings"
 
 	"github.com/bjluckow/fsvector/internal/chunk"
-	"github.com/bjluckow/fsvector/internal/fsindex"
+	"github.com/bjluckow/fsvector/internal/source"
 	"github.com/bjluckow/fsvector/internal/store"
 )
 
-func processImage(ctx context.Context, cfg Config, fi fsindex.FileInfo) (Result, error) {
+func processImage(ctx context.Context, cfg Config, fi source.FileInfo) (Result, error) {
 	data, err := readFile(ctx, cfg, fi.Path)
 	if err != nil {
 		return Result{}, fmt.Errorf("read %s: %w", fi.Path, err)
@@ -61,7 +61,7 @@ func processImage(ctx context.Context, cfg Config, fi fsindex.FileInfo) (Result,
 func describeImage(
 	ctx context.Context,
 	cfg Config,
-	fi fsindex.FileInfo,
+	fi source.FileInfo,
 	imageData []byte,
 ) string {
 	if cfg.VisionClient == nil {
@@ -80,7 +80,7 @@ func describeImage(
 func extractImageText(
 	ctx context.Context,
 	cfg Config,
-	fi fsindex.FileInfo,
+	fi source.FileInfo,
 	imageData []byte,
 	chunkOffset int,
 ) []store.File {

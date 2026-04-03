@@ -12,8 +12,6 @@ import (
 	"github.com/bjluckow/fsvector/internal/clients/transcribe"
 	"github.com/bjluckow/fsvector/internal/clients/vision"
 	"github.com/bjluckow/fsvector/internal/config"
-	"github.com/bjluckow/fsvector/internal/fsindex"
-	"github.com/bjluckow/fsvector/internal/fswatch"
 	"github.com/bjluckow/fsvector/internal/pipeline"
 	"github.com/bjluckow/fsvector/internal/source"
 	"github.com/bjluckow/fsvector/internal/store"
@@ -94,9 +92,12 @@ func main() {
 	}
 	fmt.Println("  schema ok")
 
-	// ── reconcile ─────────────────────────────────────────────────────────────
+	// ── load and reconcile data source─────────────────────────────────────────
+
+	src := source.Source(source.NewLocalSource(cfg.WatchPath))
+
 	pCfg := pipeline.Config{
-		Reader:           &source.LocalReader{},
+		Reader:           src.Reader(),
 		EmbedClient:      embedClient,
 		ConvertClient:    convertClient,
 		TranscribeClient: transcribeClient,
@@ -110,37 +111,42 @@ func main() {
 		VideoFrameRate:   cfg.VideoFrameRate,
 	}
 
-	if err := reconcile(ctx, pool, pCfg, cfg.WatchPath); err != nil {
+	if err := reconcile(ctx, pool, pCfg, src); err != nil {
 		fmt.Fprintf(os.Stderr, "fsvectord: reconcile: %v\n", err)
 		os.Exit(1)
 	}
 	fmt.Println("fsvectord ready — watching for changes")
 
-	events := make(chan fswatch.Event, 64)
+	events := make(chan source.Event, 64)
 
-	go func() {
-		if err := fswatch.Watch(ctx, cfg.WatchPath, events); err != nil {
-			fmt.Fprintf(os.Stderr, "watcher: %v\n", err)
-			os.Exit(1)
-		}
-	}()
+	if w, ok := src.(source.Watcher); ok {
+		go func() {
+			if err := w.Watch(ctx, events); err != nil {
+				fmt.Fprintf(os.Stderr, "watcher: %v\n", err)
+			}
+		}()
+		handleEvents(ctx, pool, pCfg, events)
+	} else {
+		fmt.Println("  source does not support watching — use fsvector reconcile")
+		<-ctx.Done()
+	}
 
 	handleEvents(ctx, pool, pCfg, events)
 }
 
 // reconcile diffs the filesystem against the database and brings the DB
 // into sync. It runs once on startup before the fsnotify watcher takes over.
-func reconcile(ctx context.Context, pool *pgxpool.Pool, pCfg pipeline.Config, watchPath string) error {
-	fmt.Printf("  reconciling %s\n", watchPath)
+func reconcile(ctx context.Context, pool *pgxpool.Pool, pCfg pipeline.Config, src source.Source) error {
+	fmt.Printf("  reconciling %s\n", src.URI())
 
 	// 1. walk the filesystem
-	fsFiles, err := fsindex.Walk(watchPath)
+	fsFiles, err := src.Walk(ctx)
 	if err != nil {
 		return fmt.Errorf("walk: %w", err)
 	}
 
 	// build a map for easy lookup
-	fsMap := make(map[string]fsindex.FileInfo, len(fsFiles))
+	fsMap := make(map[string]source.FileInfo, len(fsFiles))
 	for _, f := range fsFiles {
 		fsMap[f.Path] = f
 	}
@@ -235,22 +241,22 @@ func reconcile(ctx context.Context, pool *pgxpool.Pool, pCfg pipeline.Config, wa
 	return nil
 }
 
-func handleEvents(ctx context.Context, pool *pgxpool.Pool, pCfg pipeline.Config, events <-chan fswatch.Event) {
+func handleEvents(ctx context.Context, pool *pgxpool.Pool, pCfg pipeline.Config, events <-chan source.Event) {
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case e := <-events:
 			switch e.Kind {
-			case fswatch.EventDelete:
+			case source.EventDelete:
 				if err := store.SoftDelete(ctx, pool, e.Path); err != nil {
 					fmt.Fprintf(os.Stderr, "delete %s: %v\n", e.Path, err)
 				} else {
 					fmt.Printf("  deleted %s\n", e.Path)
 				}
 
-			case fswatch.EventCreate, fswatch.EventUpdate:
-				fi, err := fsindex.FileInfoFromPath(e.Path)
+			case source.EventCreate, source.EventUpdate:
+				fi, err := source.FileInfoFromPath(e.Path)
 				if err != nil {
 					fmt.Fprintf(os.Stderr, "  stat %s: %v\n", e.Path, err)
 					continue

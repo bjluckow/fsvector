@@ -8,7 +8,6 @@ import (
 	"github.com/bjluckow/fsvector/internal/clients/embed"
 	"github.com/bjluckow/fsvector/internal/clients/transcribe"
 	"github.com/bjluckow/fsvector/internal/clients/vision"
-	"github.com/bjluckow/fsvector/internal/fsindex"
 	"github.com/bjluckow/fsvector/internal/source"
 	"github.com/bjluckow/fsvector/internal/store"
 )
@@ -42,7 +41,7 @@ func readFile(ctx context.Context, cfg Config, path string) ([]byte, error) {
 
 // Process runs a single FileInfo through the full pipeline:
 // detect modality → convert → embed → return store.File ready for upsert.
-func Process(ctx context.Context, cfg Config, fi fsindex.FileInfo) (Result, error) {
+func Process(ctx context.Context, cfg Config, fi source.FileInfo) (Result, error) {
 	if fi.Size < cfg.MinEmbedSize {
 		return Result{
 			Skipped:    true,
