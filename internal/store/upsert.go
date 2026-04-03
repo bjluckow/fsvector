@@ -39,6 +39,11 @@ func Upsert(ctx context.Context, db Querier, f File) error {
 		embedding = &v
 	}
 
+	var canonicalPath *string
+	if f.CanonicalPath != nil && *f.CanonicalPath != "" {
+		canonicalPath = f.CanonicalPath
+	}
+
 	_, err := db.Exec(ctx, `
 		INSERT INTO files (
 			path, source, canonical_path,
@@ -72,7 +77,7 @@ func Upsert(ctx context.Context, db Querier, f File) error {
 			indexed_at       = now(),
 			deleted_at       = NULL
 	`,
-		f.Path, f.Source, f.CanonicalPath,
+		f.Path, f.Source, canonicalPath,
 		f.ContentHash, f.Size, f.MimeType, f.Modality,
 		f.FileName, f.FileExt, f.FileCreatedAt, f.FileModifiedAt,
 		f.EmbedModel, embedding, f.ChunkIndex, f.ChunkType,
@@ -108,6 +113,10 @@ func FindByHash(ctx context.Context, db Querier, hash string) (string, bool, err
 // UpsertDuplicate inserts a file row that points to an existing canonical path.
 // No embedding is stored — the canonical row owns the vector.
 func UpsertDuplicate(ctx context.Context, db Querier, f File, canonicalPath string) error {
+	if f.CanonicalPath != nil && *f.CanonicalPath != "" {
+		canonicalPath = *f.CanonicalPath
+	}
+
 	_, err := db.Exec(ctx, `
 		INSERT INTO files (
 			path, source, canonical_path,

@@ -16,6 +16,7 @@ import (
 	"github.com/bjluckow/fsvector/internal/config"
 	"github.com/bjluckow/fsvector/internal/daemon"
 	"github.com/bjluckow/fsvector/internal/pipeline"
+	"github.com/bjluckow/fsvector/internal/search"
 	"github.com/bjluckow/fsvector/internal/source"
 	"github.com/bjluckow/fsvector/internal/store"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -134,8 +135,15 @@ func main() {
 		VideoFrameRate:   cfg.VideoFrameRate,
 	}
 
+	sCfg := search.SearchConfig{
+		FTSWeight:   cfg.SearchFTSWeight,
+		FTSScale:    cfg.SearchFTSScale,
+		FTSMinBoost: cfg.SearchFTSMinBoost,
+		DefaultMode: search.SearchMode(cfg.SearchDefaultMode),
+	}
+
 	// ── run ───────────────────────────────────────────────────────────────────
-	d := daemon.New(pool, src, pCfg, embedClient, cfg.DaemonPort)
+	d := daemon.New(pool, src, cfg.DaemonPort, pCfg, embedClient, sCfg)
 	if err := d.Run(ctx); err != nil {
 		fmt.Fprintf(os.Stderr, "fsvectord: %v\n", err)
 		os.Exit(1)

@@ -7,6 +7,7 @@ import (
 
 	"github.com/bjluckow/fsvector/internal/clients/embed"
 	"github.com/bjluckow/fsvector/internal/pipeline"
+	"github.com/bjluckow/fsvector/internal/search"
 	"github.com/bjluckow/fsvector/internal/source"
 	"github.com/bjluckow/fsvector/internal/store"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -16,27 +17,30 @@ type Daemon struct {
 	pool        *pgxpool.Pool
 	src         source.Source
 	pCfg        pipeline.Config
+	searchCfg   search.SearchConfig
 	embedClient *embed.Client
 	progress    *Progress
-	trigger     chan struct{}
+	trigger     chan bool
 	port        int
 }
 
-func New(pool *pgxpool.Pool, src source.Source, pCfg pipeline.Config, embedClient *embed.Client, port int) *Daemon {
+func New(pool *pgxpool.Pool, src source.Source, port int,
+	pCfg pipeline.Config, embedClient *embed.Client, sCfg search.SearchConfig) *Daemon {
 	return &Daemon{
 		pool:        pool,
 		src:         src,
 		pCfg:        pCfg,
+		searchCfg:   sCfg,
 		embedClient: embedClient,
 		progress:    &Progress{},
-		trigger:     make(chan struct{}, 1),
+		trigger:     make(chan bool, 1),
 		port:        port,
 	}
 }
 
 func (d *Daemon) Run(ctx context.Context) error {
 	// start HTTP server
-	srv := newServer(d.pool, d.embedClient, d.progress, d.trigger, d.src.URI())
+	srv := newServer(d.pool, d.embedClient, d.progress, d.trigger, d.src.URI(), d.searchCfg)
 	go srv.Serve(ctx, d.port)
 
 	// initial reindex
@@ -69,12 +73,24 @@ func (d *Daemon) listenForTriggers(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
-		case <-d.trigger:
+		case purge := <-d.trigger:
+			fmt.Printf("  trigger received: purge=%v running=%v\n", purge, d.progress.Running)
 			if d.progress.Running {
 				continue
 			}
+
+			if purge {
+				n, err := store.PurgeSoftDeleted(ctx, d.pool)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "purge: %v\n", err)
+				} else {
+					fmt.Printf("  purged %d soft-deleted rows\n", n)
+				}
+			}
+
 			if err := Reindex(ctx, d.pool, d.pCfg, d.src, d.progress); err != nil {
 				fmt.Fprintf(os.Stderr, "triggered reindex: %v\n", err)
+				continue
 			}
 		}
 	}

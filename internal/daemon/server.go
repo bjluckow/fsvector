@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/bjluckow/fsvector/internal/clients/embed"
+	"github.com/bjluckow/fsvector/internal/query"
+	query_ "github.com/bjluckow/fsvector/internal/query"
 	"github.com/bjluckow/fsvector/internal/search"
 	"github.com/bjluckow/fsvector/internal/store"
 	"github.com/bjluckow/fsvector/pkg/api"
@@ -20,16 +22,18 @@ import (
 type Server struct {
 	pool        store.Querier
 	embedClient *embed.Client
+	searchCfg   search.SearchConfig
 	progress    *Progress
-	trigger     chan struct{}
+	trigger     chan bool
 	started     time.Time
 	sourceURI   string
 }
 
-func newServer(pool store.Querier, embedClient *embed.Client, progress *Progress, trigger chan struct{}, sourceURI string) *Server {
+func newServer(pool store.Querier, embedClient *embed.Client, progress *Progress, trigger chan bool, sourceURI string, searchCfg search.SearchConfig) *Server {
 	return &Server{
 		pool:        pool,
 		embedClient: embedClient,
+		searchCfg:   searchCfg,
 		progress:    progress,
 		trigger:     trigger,
 		started:     time.Now(),
@@ -42,7 +46,8 @@ func (s *Server) Serve(ctx context.Context, port int) error {
 	mux.HandleFunc("/health", s.handleHealth)
 	mux.HandleFunc("/status", s.handleStatus)
 	mux.HandleFunc("/reindex", s.handleReindex)
-	mux.HandleFunc("/search", s.handleSearch)
+	mux.HandleFunc("/search/text", s.handleSearch)
+	mux.HandleFunc("/search/image", s.handleSearchImage)
 	mux.HandleFunc("/files", s.handleFiles)
 	mux.HandleFunc("/files/", s.handleFileDetail)
 	mux.HandleFunc("/stats", s.handleStats)
@@ -89,8 +94,11 @@ func (s *Server) handleReindex(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+
+	purge := r.URL.Query().Get("purge") == "true"
+
 	select {
-	case s.trigger <- struct{}{}:
+	case s.trigger <- purge:
 		json.NewEncoder(w).Encode(map[string]string{"status": "triggered"})
 	default:
 		json.NewEncoder(w).Encode(map[string]string{"status": "already running"})
@@ -131,9 +139,23 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	cfg := s.searchCfg
+
+	// override search config
+	if req.FTSWeight > 0 {
+		cfg.FTSWeight = req.FTSWeight
+	}
+
+	mode := search.SearchMode(req.Mode)
+	if mode == "" {
+		mode = cfg.DefaultMode
+	}
+
 	// build search query
 	q := search.SearchQuery{
 		Query:  req.Query,
+		Mode:   mode,
+		Config: cfg,
 		Vector: vectors[0],
 		Limit:  req.Limit,
 		Offset: (req.Page - 1) * req.Limit,
@@ -211,6 +233,73 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(api.SearchResponse{Results: apiResults})
 }
 
+func (s *Server) handleSearchImage(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if err := r.ParseMultipartForm(32 << 20); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		http.Error(w, "file required", http.StatusBadRequest)
+		return
+	}
+	defer file.Close()
+
+	data, err := io.ReadAll(file)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	limit := 10
+	if v := r.FormValue("limit"); v != "" {
+		fmt.Sscanf(v, "%d", &limit)
+	}
+	page := 1
+	if v := r.FormValue("page"); v != "" {
+		fmt.Sscanf(v, "%d", &page)
+	}
+
+	q := search.SearchQuery{
+		Config:   s.searchCfg,
+		Limit:    limit,
+		Offset:   (page - 1) * limit,
+		Modality: r.FormValue("modality"),
+		Ext:      r.FormValue("ext"),
+		Source:   r.FormValue("source"),
+	}
+
+	results, err := search.SearchByImage(r.Context(), s.pool, s.embedClient, header.Filename, data, q)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	results = search.Normalize(results)
+
+	apiResults := make([]api.SearchResult, len(results))
+	for i, r := range results {
+		apiResults[i] = api.SearchResult{
+			Path:       r.Path,
+			Modality:   r.Modality,
+			Ext:        r.FileExt,
+			Size:       r.Size,
+			Score:      r.Score,
+			NormScore:  r.NormScore,
+			IndexedAt:  r.IndexedAt,
+			ModifiedAt: r.ModifiedAt,
+		}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(api.SearchResponse{Results: apiResults})
+}
+
 func (s *Server) handleFiles(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -227,7 +316,7 @@ func (s *Server) handleFiles(w http.ResponseWriter, r *http.Request) {
 		fmt.Sscanf(v, "%d", &page)
 	}
 
-	q := search.ListQuery{
+	q := query_.ListQuery{
 		Limit:          limit,
 		Offset:         (page - 1) * limit,
 		IncludeDeleted: query.Get("deleted") == "true",
@@ -249,7 +338,7 @@ func (s *Server) handleFiles(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	files, err := search.List(r.Context(), s.pool, q)
+	files, err := query_.List(r.Context(), s.pool, q)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -285,7 +374,9 @@ func (s *Server) handleFileDetail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	f, err := search.Show(r.Context(), s.pool, path)
+	includeDeleted := r.URL.Query().Get("include_deleted") == "true"
+
+	f, err := query.Show(r.Context(), s.pool, path, includeDeleted)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return
@@ -315,7 +406,7 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	stats, err := search.GetStats(r.Context(), s.pool)
+	stats, err := query_.GetStats(r.Context(), s.pool)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -397,7 +488,7 @@ func (s *Server) handleExportFiles(w http.ResponseWriter, r *http.Request) {
 	}
 
 	query := r.URL.Query()
-	q := search.ListQuery{
+	q := query_.ListQuery{
 		IncludeDeleted: query.Get("deleted") == "true",
 		Modality:       query.Get("modality"),
 		Ext:            query.Get("ext"),
@@ -421,7 +512,7 @@ func (s *Server) handleExportFiles(w http.ResponseWriter, r *http.Request) {
 	enc := json.NewEncoder(w)
 	flusher, canFlush := w.(http.Flusher)
 
-	err := search.ExportStream(r.Context(), s.pool, q, func(row api.ExportRow) error {
+	err := query_.ExportStream(r.Context(), s.pool, q, func(row api.ExportRow) error {
 		if err := enc.Encode(row); err != nil {
 			return err
 		}

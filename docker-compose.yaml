@@ -23,8 +23,6 @@ services:
           memory: 1g
     environment:
       EMBED_MODEL: ${EMBED_MODEL:-clip-ViT-B-32}
-      TRANSFORMERS_OFFLINE: "0"
-      HF_DATASETS_OFFLINE: "0"
     volumes:
       - hf-cache:/root/.cache/huggingface
     ports:
@@ -78,7 +76,6 @@ services:
     environment:
       CAPTION_MODEL: ${CAPTION_MODEL:-Salesforce/blip-image-captioning-base}
       VISION_OCR_ENABLED: ${VISION_OCR_ENABLED:-true}
-      TRANSFORMERS_OFFLINE: "0"
     volumes:
       - vision-cache:/root/.cache/huggingface
     ports:

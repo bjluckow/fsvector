@@ -50,26 +50,49 @@ func client() *api.Client {
 // ── search ───────────────────────────────────────────────────────────────────
 
 var (
-	searchModality string
-	searchExt      string
-	searchSource   string
-	searchSince    string
-	searchBefore   string
-	searchMinSize  string
-	searchMaxSize  string
-	searchMinScore float64
-	searchLimit    int
-	searchPage     int
+	searchMode      string
+	searchModality  string
+	searchExt       string
+	searchSource    string
+	searchSince     string
+	searchBefore    string
+	searchMinSize   string
+	searchMaxSize   string
+	searchMinScore  float64
+	searchLimit     int
+	searchPage      int
+	searchImagePath string
 )
 
 var searchCmd = &cobra.Command{
 	Use:   "search <query>",
 	Short: "Semantic search across indexed files",
-	Args:  cobra.ExactArgs(1),
+	Args: func(cmd *cobra.Command, args []string) error {
+		if searchImagePath == "" && len(args) == 0 {
+			return fmt.Errorf("query or --image required")
+		}
+		return nil
+	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
+
+		if searchImagePath != "" {
+			// image similarity search
+			resp, err := client().SearchImage(ctx, searchImagePath, searchLimit, searchModality)
+			if err != nil {
+				return err
+			}
+			renderResults(resp.Results)
+			return nil
+		}
+
+		if len(args) == 0 {
+			return fmt.Errorf("query or --image required")
+		}
+
 		resp, err := client().Search(ctx, api.SearchRequest{
 			Query:    args[0],
+			Mode:     searchMode,
 			Modality: searchModality,
 			Ext:      searchExt,
 			Source:   searchSource,
@@ -85,19 +108,24 @@ var searchCmd = &cobra.Command{
 			return err
 		}
 
-		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(w, "SCORE\tNORM\tMODALITY\tEXT\tSIZE\tPATH")
-		for _, r := range resp.Results {
-			fmt.Fprintf(w, "%.4f\t%.4f\t%s\t%s\t%s\t%s\n",
-				r.Score, r.NormScore, r.Modality, r.Ext,
-				fmtSize(r.Size), r.Path)
-		}
-		w.Flush()
+		renderResults(resp.Results)
 		return nil
 	},
 }
 
+func renderResults(results []api.SearchResult) {
+	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(w, "SCORE\tNORM\tMODALITY\tEXT\tSIZE\tPATH")
+	for _, r := range results {
+		fmt.Fprintf(w, "%.4f\t%.4f\t%s\t%s\t%s\t%s\n",
+			r.Score, r.NormScore, r.Modality, r.Ext,
+			fmtSize(r.Size), r.Path)
+	}
+	w.Flush()
+}
+
 func init() {
+	searchCmd.Flags().StringVar(&searchMode, "mode", "", "search mode: hybrid (default), vector, fulltext")
 	searchCmd.Flags().StringVarP(&searchModality, "modality", "m", "", "filter by modality (text, image, audio, video)")
 	searchCmd.Flags().StringVar(&searchExt, "ext", "", "filter by file extension")
 	searchCmd.Flags().StringVar(&searchSource, "source", "", "filter by source")
@@ -108,6 +136,8 @@ func init() {
 	searchCmd.Flags().Float64Var(&searchMinScore, "min-score", 0, "minimum similarity score")
 	searchCmd.Flags().IntVarP(&searchLimit, "limit", "n", 10, "maximum number of results")
 	searchCmd.Flags().IntVar(&searchPage, "page", 1, "page number")
+	searchCmd.Flags().StringVar(&searchImagePath, "image", "",
+		"path to image for visual similarity search")
 }
 
 // ── ls ───────────────────────────────────────────────────────────────────────
@@ -170,13 +200,17 @@ func init() {
 
 // ── show ─────────────────────────────────────────────────────────────────────
 
+var (
+	showDeleted bool
+)
+
 var showCmd = &cobra.Command{
 	Use:   "show <path>",
 	Short: "Show metadata for a specific file",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
-		f, err := client().ShowFile(ctx, args[0])
+		f, err := client().ShowFile(ctx, args[0], showDeleted)
 		if err != nil {
 			return err
 		}
@@ -187,6 +221,10 @@ var showCmd = &cobra.Command{
 		fmt.Println(string(b))
 		return nil
 	},
+}
+
+func init() {
+	showCmd.Flags().BoolVar(&showDeleted, "deleted", false, "include soft-deleted files (not present in currently-watched directory)")
 }
 
 // ── stats ────────────────────────────────────────────────────────────────────
@@ -214,18 +252,27 @@ var statsCmd = &cobra.Command{
 
 // ── reindex ──────────────────────────────────────────────────────────────────
 
+var (
+	reindexPurge bool
+)
+
 var reindexCmd = &cobra.Command{
 	Use:   "reindex",
 	Short: "Trigger a full reindex on the daemon",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
-		resp, err := client().Reindex(ctx)
+		resp, err := client().Reindex(ctx, reindexPurge)
 		if err != nil {
 			return err
 		}
 		fmt.Println(resp.Status)
 		return nil
 	},
+}
+
+func init() {
+	reindexCmd.Flags().BoolVar(&reindexPurge, "purge", false,
+		"hard-delete soft-deleted files after reindex")
 }
 
 // ── status ───────────────────────────────────────────────────────────────────

@@ -19,6 +19,13 @@ daemon:
   port: 8080
   worker_count: 4
 
+search:
+  semantic_weight: 0.5
+  fts_weight: 0.5
+  fts_scale: 10.0
+  fts_min_boost: 0.3
+  default_mode: hybrid   # hybrid | vector | fulltext
+
 embed:
   model: clip-ViT-B-32
   url: http://localhost:8100

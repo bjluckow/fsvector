@@ -75,3 +75,17 @@ func DeleteStaleChunks(ctx context.Context, db Querier, path, embedModel string,
 	}
 	return nil
 }
+
+// PurgeSoftDeleted hard-deletes all rows where deleted_at IS NOT NULL.
+// Called with --purge flag on reindex to permanently remove files that
+// are no longer in the source. Use with caution — this is irreversible.
+func PurgeSoftDeleted(ctx context.Context, db Querier) (int64, error) {
+	tag, err := db.Exec(ctx, `
+		DELETE FROM files
+		WHERE deleted_at IS NOT NULL
+	`)
+	if err != nil {
+		return 0, fmt.Errorf("purge soft deleted: %w", err)
+	}
+	return tag.RowsAffected(), nil
+}

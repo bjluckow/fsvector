@@ -9,6 +9,8 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 )
 
 type Client struct {
@@ -39,9 +41,14 @@ func (c *Client) Status(ctx context.Context) (*StatusResponse, error) {
 	return &r, nil
 }
 
-func (c *Client) Reindex(ctx context.Context) (*ReindexResponse, error) {
+func (c *Client) Reindex(ctx context.Context, purge bool) (*ReindexResponse, error) {
+	path := "/reindex"
+	if purge {
+		path += "?purge=true"
+	}
+
 	var r ReindexResponse
-	if err := c.postJSON(ctx, "/reindex", nil, &r); err != nil {
+	if err := c.postJSON(ctx, path, nil, &r); err != nil {
 		return nil, err
 	}
 	return &r, nil
@@ -49,7 +56,56 @@ func (c *Client) Reindex(ctx context.Context) (*ReindexResponse, error) {
 
 func (c *Client) Search(ctx context.Context, req SearchRequest) (*SearchResponse, error) {
 	var r SearchResponse
-	if err := c.postJSON(ctx, "/search", req, &r); err != nil {
+	if err := c.postJSON(ctx, "/search/text", req, &r); err != nil {
+		return nil, err
+	}
+	return &r, nil
+}
+
+func (c *Client) SearchImage(ctx context.Context, imagePath string, limit int, modality string) (*SearchResponse, error) {
+	data, err := os.ReadFile(imagePath)
+	if err != nil {
+		return nil, fmt.Errorf("read image: %w", err)
+	}
+
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+
+	part, err := mw.CreateFormFile("file", filepath.Base(imagePath))
+	if err != nil {
+		return nil, err
+	}
+	if _, err := part.Write(data); err != nil {
+		return nil, err
+	}
+	if limit > 0 {
+		mw.WriteField("limit", fmt.Sprintf("%d", limit))
+	}
+	if modality != "" {
+		mw.WriteField("modality", modality)
+	}
+	mw.Close()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		c.BaseURL+"/search/image", &buf)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+
+	resp, err := c.HTTP.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("search image: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("search image: status %d: %s", resp.StatusCode, b)
+	}
+
+	var r SearchResponse
+	if err := json.NewDecoder(resp.Body).Decode(&r); err != nil {
 		return nil, err
 	}
 	return &r, nil
@@ -94,9 +150,14 @@ func (c *Client) ListFiles(ctx context.Context, req ListRequest) (*ListResponse,
 	return &r, nil
 }
 
-func (c *Client) ShowFile(ctx context.Context, filePath string) (*FileDetail, error) {
+func (c *Client) ShowFile(ctx context.Context, filePath string, inclDeleted bool) (*FileDetail, error) {
 	params := url.Values{}
 	params.Set("path", filePath)
+
+	if inclDeleted {
+		params.Set("include_deleted", "true")
+	}
+
 	var r FileDetail
 	if err := c.getJSON(ctx, "/files?"+params.Encode(), &r); err != nil {
 		return nil, err
