@@ -135,7 +135,7 @@ func main() {
 	}
 
 	// ── run ───────────────────────────────────────────────────────────────────
-	d := daemon.New(pool, src, pCfg, cfg.DaemonPort)
+	d := daemon.New(pool, src, pCfg, embedClient, cfg.DaemonPort)
 	if err := d.Run(ctx); err != nil {
 		fmt.Fprintf(os.Stderr, "fsvectord: %v\n", err)
 		os.Exit(1)

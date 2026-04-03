@@ -5,22 +5,33 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
+
+	"github.com/bjluckow/fsvector/internal/clients/embed"
+	"github.com/bjluckow/fsvector/internal/search"
+	"github.com/bjluckow/fsvector/internal/store"
+	"github.com/bjluckow/fsvector/pkg/api"
+	"github.com/bjluckow/fsvector/pkg/parse"
 )
 
 type Server struct {
-	progress *Progress
-	trigger  chan struct{}
-	started  time.Time
-	source   string
+	pool        store.Querier
+	embedClient *embed.Client
+	progress    *Progress
+	trigger     chan struct{}
+	started     time.Time
+	sourceURI   string
 }
 
-func newServer(progress *Progress, trigger chan struct{}, sourceURI string) *Server {
+func newServer(pool store.Querier, embedClient *embed.Client, progress *Progress, trigger chan struct{}, sourceURI string) *Server {
 	return &Server{
-		progress: progress,
-		trigger:  trigger,
-		started:  time.Now(),
-		source:   sourceURI,
+		pool:        pool,
+		embedClient: embedClient,
+		progress:    progress,
+		trigger:     trigger,
+		started:     time.Now(),
+		sourceURI:   sourceURI,
 	}
 }
 
@@ -29,6 +40,10 @@ func (s *Server) Serve(ctx context.Context, port int) error {
 	mux.HandleFunc("/health", s.handleHealth)
 	mux.HandleFunc("/status", s.handleStatus)
 	mux.HandleFunc("/reindex", s.handleReindex)
+	mux.HandleFunc("/search", s.handleSearch)
+	mux.HandleFunc("/files", s.handleFiles)
+	mux.HandleFunc("/files/", s.handleFileDetail)
+	mux.HandleFunc("/stats", s.handleStats)
 
 	srv := &http.Server{
 		Addr:    fmt.Sprintf("127.0.0.1:%d", port),
@@ -55,7 +70,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	snap := s.progress.snapshot()
 	json.NewEncoder(w).Encode(map[string]any{
 		"status":     statusString(snap.Running),
-		"source":     s.source,
+		"source":     s.sourceURI,
 		"started_at": s.started,
 		"reindex":    snap,
 	})
@@ -79,4 +94,234 @@ func statusString(running bool) string {
 		return "reconciling"
 	}
 	return "idle"
+}
+
+func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req api.SearchRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	// set defaults
+	if req.Limit == 0 {
+		req.Limit = 10
+	}
+	if req.Page == 0 {
+		req.Page = 1
+	}
+
+	// embed query
+	vectors, err := s.embedClient.EmbedTexts(r.Context(), []string{req.Query})
+	if err != nil {
+		http.Error(w, fmt.Sprintf("embed: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// build search query
+	q := search.SearchQuery{
+		Query:  req.Query,
+		Vector: vectors[0],
+		Limit:  req.Limit,
+		Offset: (req.Page - 1) * req.Limit,
+	}
+
+	if req.Modality != "" {
+		q.Modality = req.Modality
+	}
+	if req.Ext != "" {
+		q.Ext = req.Ext
+	}
+	if req.Source != "" {
+		q.Source = req.Source
+	}
+	if req.Since != "" {
+		t, err := parse.Since(req.Since)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("since: %v", err), http.StatusBadRequest)
+			return
+		}
+		q.Since = &t
+	}
+	if req.Before != "" {
+		t, err := parse.Since(req.Before)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("before: %v", err), http.StatusBadRequest)
+			return
+		}
+		q.Before = &t
+	}
+	if req.MinSize != "" {
+		n, err := parse.Size(req.MinSize)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("min_size: %v", err), http.StatusBadRequest)
+			return
+		}
+		q.MinSize = &n
+	}
+	if req.MaxSize != "" {
+		n, err := parse.Size(req.MaxSize)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("max_size: %v", err), http.StatusBadRequest)
+			return
+		}
+		q.MaxSize = &n
+	}
+	if req.MinScore != 0 {
+		q.MinScore = &req.MinScore
+	}
+
+	results, err := search.Search(r.Context(), s.pool, q)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	results = search.Normalize(results)
+
+	// convert to api types
+	apiResults := make([]api.SearchResult, len(results))
+	for i, r := range results {
+		apiResults[i] = api.SearchResult{
+			Path:       r.Path,
+			Modality:   r.Modality,
+			Ext:        r.FileExt,
+			Size:       r.Size,
+			Score:      r.Score,
+			NormScore:  r.NormScore,
+			IndexedAt:  r.IndexedAt,
+			ModifiedAt: r.ModifiedAt,
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(api.SearchResponse{Results: apiResults})
+}
+
+func (s *Server) handleFiles(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	query := r.URL.Query()
+	limit := 100
+	page := 1
+	if v := query.Get("limit"); v != "" {
+		fmt.Sscanf(v, "%d", &limit)
+	}
+	if v := query.Get("page"); v != "" {
+		fmt.Sscanf(v, "%d", &page)
+	}
+
+	q := search.ListQuery{
+		Limit:          limit,
+		Offset:         (page - 1) * limit,
+		IncludeDeleted: query.Get("deleted") == "true",
+		Modality:       query.Get("modality"),
+		Ext:            query.Get("ext"),
+		Source:         query.Get("source"),
+	}
+
+	if v := query.Get("since"); v != "" {
+		t, err := parse.Since(v)
+		if err == nil {
+			q.Since = &t
+		}
+	}
+	if v := query.Get("before"); v != "" {
+		t, err := parse.Since(v)
+		if err == nil {
+			q.Before = &t
+		}
+	}
+
+	files, err := search.List(r.Context(), s.pool, q)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	apiFiles := make([]api.FileItem, len(files))
+	for i, f := range files {
+		apiFiles[i] = api.FileItem{
+			Path:        f.Path,
+			Modality:    f.Modality,
+			Ext:         f.FileExt,
+			Size:        f.Size,
+			IndexedAt:   f.IndexedAt,
+			ModifiedAt:  f.ModifiedAt,
+			DeletedAt:   f.DeletedAt,
+			IsDuplicate: f.IsDuplicate,
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(api.ListResponse{Files: apiFiles})
+}
+
+func (s *Server) handleFileDetail(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	path := strings.TrimPrefix(r.URL.Path, "/files/")
+	if path == "" {
+		http.Error(w, "path required", http.StatusBadRequest)
+		return
+	}
+
+	f, err := search.Show(r.Context(), s.pool, path)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(api.FileDetail{
+		Path:          f.Path,
+		Source:        f.Source,
+		CanonicalPath: f.CanonicalPath,
+		ContentHash:   f.ContentHash,
+		Size:          f.Size,
+		MimeType:      f.MimeType,
+		Modality:      f.Modality,
+		Ext:           f.FileExt,
+		EmbedModel:    f.EmbedModel,
+		ChunkCount:    f.ChunkCount,
+		IndexedAt:     f.IndexedAt,
+		ModifiedAt:    f.ModifiedAt,
+		DeletedAt:     f.DeletedAt,
+	})
+}
+
+func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	stats, err := search.GetStats(r.Context(), s.pool)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(api.StatsResponse{
+		Model:      stats.EmbedModel,
+		Total:      stats.TotalFiles,
+		Text:       stats.TextFiles,
+		Image:      stats.ImageFiles,
+		Audio:      stats.AudioFiles,
+		Video:      stats.VideoFiles,
+		Deleted:    stats.DeletedFiles,
+		Duplicates: stats.Duplicates,
+	})
 }

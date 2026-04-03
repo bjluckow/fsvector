@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/bjluckow/fsvector/internal/clients/embed"
 	"github.com/bjluckow/fsvector/internal/pipeline"
 	"github.com/bjluckow/fsvector/internal/source"
 	"github.com/bjluckow/fsvector/internal/store"
@@ -12,36 +13,38 @@ import (
 )
 
 type Daemon struct {
-	pool     *pgxpool.Pool
-	src      source.Source
-	pCfg     pipeline.Config
-	progress *Progress
-	trigger  chan struct{}
-	port     int
+	pool        *pgxpool.Pool
+	src         source.Source
+	pCfg        pipeline.Config
+	embedClient *embed.Client
+	progress    *Progress
+	trigger     chan struct{}
+	port        int
 }
 
-func New(pool *pgxpool.Pool, src source.Source, pCfg pipeline.Config, port int) *Daemon {
+func New(pool *pgxpool.Pool, src source.Source, pCfg pipeline.Config, embedClient *embed.Client, port int) *Daemon {
 	return &Daemon{
-		pool:     pool,
-		src:      src,
-		pCfg:     pCfg,
-		progress: &Progress{},
-		trigger:  make(chan struct{}, 1),
-		port:     port,
+		pool:        pool,
+		src:         src,
+		pCfg:        pCfg,
+		embedClient: embedClient,
+		progress:    &Progress{},
+		trigger:     make(chan struct{}, 1),
+		port:        port,
 	}
 }
 
 func (d *Daemon) Run(ctx context.Context) error {
 	// start HTTP server
-	srv := newServer(d.progress, d.trigger, d.src.URI())
+	srv := newServer(d.pool, d.embedClient, d.progress, d.trigger, d.src.URI())
 	go srv.Serve(ctx, d.port)
 
-	// initial reconcile
+	// initial reindex
 	if err := Reindex(ctx, d.pool, d.pCfg, d.src, d.progress); err != nil {
-		return fmt.Errorf("reconcile: %w", err)
+		return fmt.Errorf("reindex: %w", err)
 	}
 
-	// handle reconcile triggers from HTTP server
+	// handle reindex triggers from HTTP server
 	go d.listenForTriggers(ctx)
 
 	// watch if supported
@@ -54,7 +57,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 		}()
 		d.handleEvents(ctx, events)
 	} else {
-		fmt.Println("  source does not support watching — use fsvector reconcile")
+		fmt.Println("  source does not support watching — use fsvector reindex")
 		<-ctx.Done()
 	}
 
@@ -71,7 +74,7 @@ func (d *Daemon) listenForTriggers(ctx context.Context) {
 				continue
 			}
 			if err := Reindex(ctx, d.pool, d.pCfg, d.src, d.progress); err != nil {
-				fmt.Fprintf(os.Stderr, "triggered reconcile: %v\n", err)
+				fmt.Fprintf(os.Stderr, "triggered reindex: %v\n", err)
 			}
 		}
 	}

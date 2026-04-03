@@ -39,7 +39,8 @@ func GetStats(ctx context.Context, db store.Querier) (*Stats, error) {
 		FROM files
 	`).Scan(
 		&s.TotalFiles, &s.DeletedFiles, &s.Duplicates,
-		&s.TextFiles, &s.ImageFiles, &s.AudioFiles, &s.EmbedModel,
+		&s.TextFiles, &s.ImageFiles, &s.AudioFiles, &s.VideoFiles,
+		&s.EmbedModel,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("stats: %w", err)
