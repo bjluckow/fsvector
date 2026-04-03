@@ -46,7 +46,8 @@ func (s *Server) Serve(ctx context.Context, port int) error {
 	mux.HandleFunc("/health", s.handleHealth)
 	mux.HandleFunc("/status", s.handleStatus)
 	mux.HandleFunc("/reindex", s.handleReindex)
-	mux.HandleFunc("/search", s.handleSearch)
+	mux.HandleFunc("/search/text", s.handleSearch)
+	mux.HandleFunc("/search/image", s.handleSearchImage)
 	mux.HandleFunc("/files", s.handleFiles)
 	mux.HandleFunc("/files/", s.handleFileDetail)
 	mux.HandleFunc("/stats", s.handleStats)
@@ -225,6 +226,73 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(api.SearchResponse{Results: apiResults})
+}
+
+func (s *Server) handleSearchImage(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if err := r.ParseMultipartForm(32 << 20); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		http.Error(w, "file required", http.StatusBadRequest)
+		return
+	}
+	defer file.Close()
+
+	data, err := io.ReadAll(file)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	limit := 10
+	if v := r.FormValue("limit"); v != "" {
+		fmt.Sscanf(v, "%d", &limit)
+	}
+	page := 1
+	if v := r.FormValue("page"); v != "" {
+		fmt.Sscanf(v, "%d", &page)
+	}
+
+	q := search.SearchQuery{
+		Config:   s.searchCfg,
+		Limit:    limit,
+		Offset:   (page - 1) * limit,
+		Modality: r.FormValue("modality"),
+		Ext:      r.FormValue("ext"),
+		Source:   r.FormValue("source"),
+	}
+
+	results, err := search.SearchByImage(r.Context(), s.pool, s.embedClient, header.Filename, data, q)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	results = search.Normalize(results)
+
+	apiResults := make([]api.SearchResult, len(results))
+	for i, r := range results {
+		apiResults[i] = api.SearchResult{
+			Path:       r.Path,
+			Modality:   r.Modality,
+			Ext:        r.FileExt,
+			Size:       r.Size,
+			Score:      r.Score,
+			NormScore:  r.NormScore,
+			IndexedAt:  r.IndexedAt,
+			ModifiedAt: r.ModifiedAt,
+		}
+	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(api.SearchResponse{Results: apiResults})
 }

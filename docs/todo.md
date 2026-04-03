@@ -4,3 +4,4 @@
   → reads image bytes, sends to /embed/image, searches by resulting vector
 - Multiple search variations in search/search.go (pure vector, hybrid, full-text)
 - fsvector reindex --purge
+- full OCR + captioning for image search queries
