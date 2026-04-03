@@ -1,0 +1,35 @@
+pipeline:
+  chunk_size: 1000
+  chunk_overlap: 100
+  min_chunk_size: 10
+  min_embed_size: 100
+  video_frame_rate: 1.0
+
+source:
+  type: local
+  watch_path: /data/source
+  s3_bucket: ""
+  s3_prefix: ""
+  s3_region: us-east-1
+  large_file_threshold: 104857600  # 100MB
+
+daemon:
+  port: 8080
+  worker_count: 4
+
+embed:
+  model: clip-ViT-B-32
+  url: http://localhost:8100
+
+convert:
+  url: http://localhost:8101
+
+transcribe:
+  model: base.en
+  url: http://localhost:8002
+
+vision:
+  caption_model: Salesforce/blip-image-captioning-base
+  ocr_enabled: true
+  url: http://localhost:8003
+  caption_frames: false

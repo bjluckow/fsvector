@@ -104,7 +104,7 @@ func main() {
 		TranscribeClient: transcribeClient,
 		VisionClient:     visionClient,
 		EmbedModel:       health.Model,
-		Source:           cfg.Source,
+		Source:           cfg.SourceType,
 		MinEmbedSize:     cfg.MinEmbedSize,
 		ChunkSize:        cfg.ChunkSize,
 		ChunkOverlap:     cfg.ChunkOverlap,
