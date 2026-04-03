@@ -421,7 +421,7 @@ func (s *Server) handleExportFiles(w http.ResponseWriter, r *http.Request) {
 	enc := json.NewEncoder(w)
 	flusher, canFlush := w.(http.Flusher)
 
-	err := search.ExportStream(r.Context(), s.pool, q, func(row search.ExportRow) error {
+	err := search.ExportStream(r.Context(), s.pool, q, func(row api.ExportRow) error {
 		if err := enc.Encode(row); err != nil {
 			return err
 		}
