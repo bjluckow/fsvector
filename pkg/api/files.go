@@ -54,3 +54,19 @@ type StatsResponse struct {
 	Deleted    int    `json:"deleted"`
 	Duplicates int    `json:"duplicates"`
 }
+
+type ExportRow struct {
+	Path        string         `json:"path"`
+	Source      string         `json:"source"`
+	Modality    string         `json:"modality"`
+	Ext         string         `json:"ext"`
+	MimeType    string         `json:"mime_type"`
+	EmbedModel  string         `json:"embed_model"`
+	Embedding   []float32      `json:"embedding"`
+	ChunkIndex  int            `json:"chunk_index"`
+	ChunkType   *string        `json:"chunk_type,omitempty"`
+	TextContent *string        `json:"text_content,omitempty"`
+	Metadata    map[string]any `json:"metadata,omitempty"`
+	IndexedAt   time.Time      `json:"indexed_at"`
+	ModifiedAt  *time.Time     `json:"modified_at,omitempty"`
+}

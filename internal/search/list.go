@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/bjluckow/fsvector/internal/store"
+	"github.com/bjluckow/fsvector/pkg/api"
 	"github.com/pgvector/pgvector-go"
 )
 
@@ -106,26 +107,10 @@ func List(ctx context.Context, db store.Querier, q ListQuery) ([]ListFile, error
 	return files, rows.Err()
 }
 
-type ExportRow struct {
-	Path        string         `json:"path"`
-	Source      string         `json:"source"`
-	Modality    string         `json:"modality"`
-	Ext         string         `json:"ext"`
-	MimeType    string         `json:"mime_type"`
-	EmbedModel  string         `json:"embed_model"`
-	Embedding   []float32      `json:"embedding"`
-	ChunkIndex  int            `json:"chunk_index"`
-	ChunkType   *string        `json:"chunk_type,omitempty"`
-	TextContent *string        `json:"text_content,omitempty"`
-	Metadata    map[string]any `json:"metadata,omitempty"`
-	IndexedAt   time.Time      `json:"indexed_at"`
-	ModifiedAt  *time.Time     `json:"modified_at,omitempty"`
-}
-
 // Export returns full file rows including embeddings, using the same
 // filters as List. Used for cross-instance sync and plugin data access.
 // WARNING: Can be extremely memory intensive without streaming, use ExportStream instead
-func Export(ctx context.Context, db store.Querier, q ListQuery) ([]ExportRow, error) {
+func Export(ctx context.Context, db store.Querier, q ListQuery) ([]api.ExportRow, error) {
 	sql := `
 		SELECT
 			path, source, modality, file_ext, mime_type,
@@ -176,9 +161,9 @@ func Export(ctx context.Context, db store.Querier, q ListQuery) ([]ExportRow, er
 	}
 	defer rows.Close()
 
-	var result []ExportRow
+	var result []api.ExportRow
 	for rows.Next() {
-		var r ExportRow
+		var r api.ExportRow
 		var embedding pgvector.Vector
 		if err := rows.Scan(
 			&r.Path, &r.Source, &r.Modality, &r.Ext, &r.MimeType,
@@ -195,7 +180,7 @@ func Export(ctx context.Context, db store.Querier, q ListQuery) ([]ExportRow, er
 
 // ExportStream calls fn for each matching row as it comes from postgres.
 // Never holds more than one row in memory at a time.
-func ExportStream(ctx context.Context, db store.Querier, q ListQuery, fn func(ExportRow) error) error {
+func ExportStream(ctx context.Context, db store.Querier, q ListQuery, fn func(api.ExportRow) error) error {
 	sql := `
 		SELECT
 			path, source, modality, file_ext, mime_type,
@@ -246,7 +231,7 @@ func ExportStream(ctx context.Context, db store.Querier, q ListQuery, fn func(Ex
 	defer rows.Close()
 
 	for rows.Next() {
-		var r ExportRow
+		var r api.ExportRow
 		var embedding pgvector.Vector
 		if err := rows.Scan(
 			&r.Path, &r.Source, &r.Modality, &r.Ext, &r.MimeType,
