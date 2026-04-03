@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/jackc/pgx/v5"
+	"github.com/bjluckow/fsvector/internal/store"
 	"github.com/pgvector/pgvector-go"
 )
 
@@ -41,7 +41,7 @@ type SearchQuery struct {
 }
 
 // Search performs a cosine similarity search against live, canonical files.
-func Search(ctx context.Context, conn *pgx.Conn, q SearchQuery) ([]SearchResult, error) {
+func Search(ctx context.Context, db store.Querier, q SearchQuery) ([]SearchResult, error) {
 	v := pgvector.NewVector(q.Vector)
 	embeddingCol := "embedding"
 
@@ -153,7 +153,7 @@ func Search(ctx context.Context, conn *pgx.Conn, q SearchQuery) ([]SearchResult,
 		LIMIT $2 OFFSET $3
 	`, inner)
 
-	rows, err := conn.Query(ctx, sql, args...)
+	rows, err := db.Query(ctx, sql, args...)
 	if err != nil {
 		return nil, fmt.Errorf("search: %w", err)
 	}

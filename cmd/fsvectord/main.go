@@ -17,7 +17,7 @@ import (
 	"github.com/bjluckow/fsvector/internal/pipeline"
 	"github.com/bjluckow/fsvector/internal/source"
 	"github.com/bjluckow/fsvector/internal/store"
-	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 func main() {
@@ -66,15 +66,15 @@ func main() {
 	fmt.Printf("  vision model : %s (ocr=%v)\n", visionHealth.CaptionModel, visionHealth.OCR)
 
 	// ── connect to postgres ───────────────────────────────────────────────────
-	conn, err := pgx.Connect(ctx, cfg.DatabaseURL)
+	pool, err := pgxpool.New(ctx, cfg.DatabaseURL)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "fsvectord: db connect: %v\n", err)
 		os.Exit(1)
 	}
-	defer conn.Close(ctx)
+	defer pool.Close()
 
 	// ── check for dimension mismatch ──────────────────────────────────────────
-	existingDim, err := store.EmbeddingDim(ctx, conn)
+	existingDim, err := store.EmbeddingDim(ctx, pool)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "fsvectord: dim check: %v\n", err)
 		os.Exit(1)
@@ -88,7 +88,7 @@ func main() {
 	}
 
 	// ── migrate ───────────────────────────────────────────────────────────────
-	if err := store.Migrate(ctx, conn, health.Dim); err != nil {
+	if err := store.Migrate(ctx, pool, health.Dim); err != nil {
 		fmt.Fprintf(os.Stderr, "fsvectord: migrate: %v\n", err)
 		os.Exit(1)
 	}
@@ -110,7 +110,7 @@ func main() {
 		VideoFrameRate:   cfg.VideoFrameRate,
 	}
 
-	if err := reconcile(ctx, conn, pCfg, cfg.WatchPath); err != nil {
+	if err := reconcile(ctx, pool, pCfg, cfg.WatchPath); err != nil {
 		fmt.Fprintf(os.Stderr, "fsvectord: reconcile: %v\n", err)
 		os.Exit(1)
 	}
@@ -125,12 +125,12 @@ func main() {
 		}
 	}()
 
-	handleEvents(ctx, conn, pCfg, events)
+	handleEvents(ctx, pool, pCfg, events)
 }
 
 // reconcile diffs the filesystem against the database and brings the DB
 // into sync. It runs once on startup before the fsnotify watcher takes over.
-func reconcile(ctx context.Context, conn *pgx.Conn, pCfg pipeline.Config, watchPath string) error {
+func reconcile(ctx context.Context, pool *pgxpool.Pool, pCfg pipeline.Config, watchPath string) error {
 	fmt.Printf("  reconciling %s\n", watchPath)
 
 	// 1. walk the filesystem
@@ -146,7 +146,7 @@ func reconcile(ctx context.Context, conn *pgx.Conn, pCfg pipeline.Config, watchP
 	}
 
 	// 2. load live DB state
-	dbFiles, err := store.LivePaths(ctx, conn)
+	dbFiles, err := store.LivePaths(ctx, pool)
 	if err != nil {
 		return fmt.Errorf("live paths: %w", err)
 	}
@@ -155,7 +155,7 @@ func reconcile(ctx context.Context, conn *pgx.Conn, pCfg pipeline.Config, watchP
 	deleted := 0
 	for path := range dbFiles {
 		if _, exists := fsMap[path]; !exists {
-			if err := store.SoftDelete(ctx, conn, path); err != nil {
+			if err := store.SoftDelete(ctx, pool, path); err != nil {
 				fmt.Fprintf(os.Stderr, "    soft-delete %s: %v\n", path, err)
 				continue
 			}
@@ -177,7 +177,7 @@ func reconcile(ctx context.Context, conn *pgx.Conn, pCfg pipeline.Config, watchP
 		}
 
 		// check for duplicate content
-		if canonicalPath, isDupe, err := store.FindByHash(ctx, conn, fi.Hash); err != nil {
+		if canonicalPath, isDupe, err := store.FindByHash(ctx, pool, fi.Hash); err != nil {
 			fmt.Fprintf(os.Stderr, "    hash check %s: %v\n", fi.Path, err)
 			continue
 		} else if isDupe && canonicalPath != fi.Path {
@@ -194,7 +194,7 @@ func reconcile(ctx context.Context, conn *pgx.Conn, pCfg pipeline.Config, watchP
 				FileModifiedAt: &fi.ModifiedAt,
 				EmbedModel:     pCfg.EmbedModel,
 			}
-			if err := store.UpsertDuplicate(ctx, conn, f, canonicalPath); err != nil {
+			if err := store.UpsertDuplicate(ctx, pool, f, canonicalPath); err != nil {
 				fmt.Fprintf(os.Stderr, "    dupe upsert %s: %v\n", fi.Path, err)
 			} else {
 				fmt.Printf("    duplicate %s -> %s\n", fi.Path, canonicalPath)
@@ -215,14 +215,14 @@ func reconcile(ctx context.Context, conn *pgx.Conn, pCfg pipeline.Config, watchP
 		}
 
 		for _, f := range result.Files {
-			if err := store.Upsert(ctx, conn, f); err != nil {
+			if err := store.Upsert(ctx, pool, f); err != nil {
 				fmt.Fprintf(os.Stderr, "    upsert %s chunk %d: %v\n", fi.Path, f.ChunkIndex, err)
 				continue
 			}
 		}
 
 		// clean up stale chunks from previous indexing
-		if err := store.DeleteStaleChunks(ctx, conn, fi.Path, pCfg.EmbedModel, len(result.Files)); err != nil {
+		if err := store.DeleteStaleChunks(ctx, pool, fi.Path, pCfg.EmbedModel, len(result.Files)); err != nil {
 			fmt.Fprintf(os.Stderr, "    stale chunks %s: %v\n", fi.Path, err)
 		}
 
@@ -235,7 +235,7 @@ func reconcile(ctx context.Context, conn *pgx.Conn, pCfg pipeline.Config, watchP
 	return nil
 }
 
-func handleEvents(ctx context.Context, conn *pgx.Conn, pCfg pipeline.Config, events <-chan fswatch.Event) {
+func handleEvents(ctx context.Context, pool *pgxpool.Pool, pCfg pipeline.Config, events <-chan fswatch.Event) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -243,7 +243,7 @@ func handleEvents(ctx context.Context, conn *pgx.Conn, pCfg pipeline.Config, eve
 		case e := <-events:
 			switch e.Kind {
 			case fswatch.EventDelete:
-				if err := store.SoftDelete(ctx, conn, e.Path); err != nil {
+				if err := store.SoftDelete(ctx, pool, e.Path); err != nil {
 					fmt.Fprintf(os.Stderr, "delete %s: %v\n", e.Path, err)
 				} else {
 					fmt.Printf("  deleted %s\n", e.Path)
@@ -266,13 +266,13 @@ func handleEvents(ctx context.Context, conn *pgx.Conn, pCfg pipeline.Config, eve
 				}
 
 				for _, f := range result.Files {
-					if err := store.Upsert(ctx, conn, f); err != nil {
+					if err := store.Upsert(ctx, pool, f); err != nil {
 						fmt.Fprintf(os.Stderr, "  upsert %s chunk %d: %v\n", e.Path, f.ChunkIndex, err)
 						continue
 					}
 				}
 
-				if err := store.DeleteStaleChunks(ctx, conn, e.Path, pCfg.EmbedModel, len(result.Files)); err != nil {
+				if err := store.DeleteStaleChunks(ctx, pool, e.Path, pCfg.EmbedModel, len(result.Files)); err != nil {
 					fmt.Fprintf(os.Stderr, "  stale chunks %s: %v\n", e.Path, err)
 				}
 

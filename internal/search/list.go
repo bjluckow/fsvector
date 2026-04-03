@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/jackc/pgx/v5"
+	"github.com/bjluckow/fsvector/internal/store"
 )
 
 // ListFile is a single row returned by List.
@@ -35,7 +35,7 @@ type ListQuery struct {
 }
 
 // List returns indexed files matching the query.
-func List(ctx context.Context, conn *pgx.Conn, q ListQuery) ([]ListFile, error) {
+func List(ctx context.Context, db store.Querier, q ListQuery) ([]ListFile, error) {
 	sql := `
 		SELECT
 			path,
@@ -84,7 +84,7 @@ func List(ctx context.Context, conn *pgx.Conn, q ListQuery) ([]ListFile, error) 
 
 	sql += " ORDER BY path LIMIT $1 OFFSET $2"
 
-	rows, err := conn.Query(ctx, sql, args...)
+	rows, err := db.Query(ctx, sql, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list: %w", err)
 	}
