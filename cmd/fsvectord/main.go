@@ -15,6 +15,7 @@ import (
 	"github.com/bjluckow/fsvector/internal/fsindex"
 	"github.com/bjluckow/fsvector/internal/fswatch"
 	"github.com/bjluckow/fsvector/internal/pipeline"
+	"github.com/bjluckow/fsvector/internal/source"
 	"github.com/bjluckow/fsvector/internal/store"
 	"github.com/jackc/pgx/v5"
 )
@@ -95,6 +96,7 @@ func main() {
 
 	// ── reconcile ─────────────────────────────────────────────────────────────
 	pCfg := pipeline.Config{
+		Reader:           &source.LocalReader{},
 		EmbedClient:      embedClient,
 		ConvertClient:    convertClient,
 		TranscribeClient: transcribeClient,

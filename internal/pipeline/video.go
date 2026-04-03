@@ -13,7 +13,7 @@ import (
 )
 
 func processVideo(ctx context.Context, cfg Config, fi fsindex.FileInfo) (Result, error) {
-	data, err := readFile(fi.Path)
+	data, err := readFile(ctx, cfg, fi.Path)
 	if err != nil {
 		return Result{}, fmt.Errorf("read %s: %w", fi.Path, err)
 	}
