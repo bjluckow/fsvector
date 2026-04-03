@@ -77,6 +77,10 @@ func Load() (*Config, error) {
 	viper.SetDefault("daemon.port", 8080)
 	viper.SetDefault("daemon.worker_count", 4)
 
+	// bind custom env vars
+	viper.BindEnv("source.s3_bucket", "AWS_BUCKET_NAME")
+	viper.BindEnv("source.s3_region", "AWS_REGION")
+
 	if err := viper.ReadInConfig(); err != nil {
 		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
 			return nil, fmt.Errorf("config: %w", err)

@@ -32,14 +32,14 @@ func New(pool *pgxpool.Pool, src source.Source, pCfg pipeline.Config, port int) 
 }
 
 func (d *Daemon) Run(ctx context.Context) error {
+	// start HTTP server
+	srv := newServer(d.progress, d.trigger, d.src.URI())
+	go srv.Serve(ctx, d.port)
+
 	// initial reconcile
 	if err := Reindex(ctx, d.pool, d.pCfg, d.src, d.progress); err != nil {
 		return fmt.Errorf("reconcile: %w", err)
 	}
-
-	// start HTTP server
-	srv := newServer(d.progress, d.trigger, d.src.URI())
-	go srv.Serve(ctx, d.port)
 
 	// handle reconcile triggers from HTTP server
 	go d.listenForTriggers(ctx)

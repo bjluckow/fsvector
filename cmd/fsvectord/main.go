@@ -7,6 +7,8 @@ import (
 	"os/signal"
 	"syscall"
 
+	awsconfig "github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/bjluckow/fsvector/internal/clients/convert"
 	"github.com/bjluckow/fsvector/internal/clients/embed"
 	"github.com/bjluckow/fsvector/internal/clients/transcribe"
@@ -95,7 +97,27 @@ func main() {
 
 	// ── load and reconcile data source─────────────────────────────────────────
 
-	src := source.Source(source.NewLocalSource(cfg.WatchPath))
+	var src source.Source
+	switch cfg.SourceType {
+	case "s3":
+		awsCfg, err := awsconfig.LoadDefaultConfig(ctx,
+			awsconfig.WithRegion(cfg.S3Region),
+		)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "fsvectord: aws config: %v\n", err)
+			os.Exit(1)
+		}
+		src = source.NewS3Source(source.S3Config{
+			Client:             s3.NewFromConfig(awsCfg),
+			Bucket:             cfg.S3Bucket,
+			Prefix:             cfg.S3Prefix,
+			LargeFileThreshold: cfg.LargeFileThreshold,
+		})
+		fmt.Printf("  source       : %s\n", src.URI())
+	default:
+		src = source.NewLocalSource(cfg.WatchPath)
+		fmt.Printf("  source       : %s\n", cfg.WatchPath)
+	}
 
 	pCfg := pipeline.Config{
 		Reader:           src.Reader(),
