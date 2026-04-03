@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -44,6 +46,12 @@ func (s *Server) Serve(ctx context.Context, port int) error {
 	mux.HandleFunc("/files", s.handleFiles)
 	mux.HandleFunc("/files/", s.handleFileDetail)
 	mux.HandleFunc("/stats", s.handleStats)
+	mux.HandleFunc("/embed/text", s.handleEmbedText)
+	mux.HandleFunc("/embed/image", s.handleEmbedImage)
+	mux.HandleFunc("/export/files", s.handleExportFiles)
+	mux.HandleFunc("/test", func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("hello world"))
+	})
 
 	srv := &http.Server{
 		Addr:    fmt.Sprintf("127.0.0.1:%d", port),
@@ -324,4 +332,106 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 		Deleted:    stats.DeletedFiles,
 		Duplicates: stats.Duplicates,
 	})
+}
+
+func (s *Server) handleEmbedText(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req api.EmbedTextRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	embeddings, err := s.embedClient.EmbedTexts(r.Context(), req.Texts)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(api.EmbedTextResponse{Embeddings: embeddings})
+}
+
+func (s *Server) handleEmbedImage(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if err := r.ParseMultipartForm(32 << 20); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		http.Error(w, "file required", http.StatusBadRequest)
+		return
+	}
+	defer file.Close()
+
+	data, err := io.ReadAll(file)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	embedding, err := s.embedClient.EmbedImage(r.Context(), header.Filename, data)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(api.EmbedImageResponse{Embedding: embedding})
+}
+
+func (s *Server) handleExportFiles(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	query := r.URL.Query()
+	q := search.ListQuery{
+		IncludeDeleted: query.Get("deleted") == "true",
+		Modality:       query.Get("modality"),
+		Ext:            query.Get("ext"),
+		Source:         query.Get("source"),
+	}
+
+	if v := query.Get("since"); v != "" {
+		t, err := parse.Since(v)
+		if err == nil {
+			q.Since = &t
+		}
+	}
+	if v := query.Get("before"); v != "" {
+		t, err := parse.Since(v)
+		if err == nil {
+			q.Before = &t
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/x-ndjson")
+	enc := json.NewEncoder(w)
+	flusher, canFlush := w.(http.Flusher)
+
+	err := search.ExportStream(r.Context(), s.pool, q, func(row search.ExportRow) error {
+		if err := enc.Encode(row); err != nil {
+			return err
+		}
+		if canFlush {
+			flusher.Flush()
+		}
+		return nil
+	})
+	if err != nil {
+		// headers already sent — just log
+		fmt.Fprintf(os.Stderr, "export stream: %v\n", err)
+	}
 }
