@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/bjluckow/fsvector/internal/clients/embed"
+	"github.com/bjluckow/fsvector/internal/query"
+	query_ "github.com/bjluckow/fsvector/internal/query"
 	"github.com/bjluckow/fsvector/internal/search"
 	"github.com/bjluckow/fsvector/internal/store"
 	"github.com/bjluckow/fsvector/pkg/api"
@@ -243,7 +245,7 @@ func (s *Server) handleFiles(w http.ResponseWriter, r *http.Request) {
 		fmt.Sscanf(v, "%d", &page)
 	}
 
-	q := search.ListQuery{
+	q := query_.ListQuery{
 		Limit:          limit,
 		Offset:         (page - 1) * limit,
 		IncludeDeleted: query.Get("deleted") == "true",
@@ -265,7 +267,7 @@ func (s *Server) handleFiles(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	files, err := search.List(r.Context(), s.pool, q)
+	files, err := query_.List(r.Context(), s.pool, q)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -301,7 +303,7 @@ func (s *Server) handleFileDetail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	f, err := search.Show(r.Context(), s.pool, path)
+	f, err := query.Show(r.Context(), s.pool, path)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return
@@ -331,7 +333,7 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	stats, err := search.GetStats(r.Context(), s.pool)
+	stats, err := query_.GetStats(r.Context(), s.pool)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -413,7 +415,7 @@ func (s *Server) handleExportFiles(w http.ResponseWriter, r *http.Request) {
 	}
 
 	query := r.URL.Query()
-	q := search.ListQuery{
+	q := query_.ListQuery{
 		IncludeDeleted: query.Get("deleted") == "true",
 		Modality:       query.Get("modality"),
 		Ext:            query.Get("ext"),
@@ -437,7 +439,7 @@ func (s *Server) handleExportFiles(w http.ResponseWriter, r *http.Request) {
 	enc := json.NewEncoder(w)
 	flusher, canFlush := w.(http.Flusher)
 
-	err := search.ExportStream(r.Context(), s.pool, q, func(row api.ExportRow) error {
+	err := query_.ExportStream(r.Context(), s.pool, q, func(row api.ExportRow) error {
 		if err := enc.Encode(row); err != nil {
 			return err
 		}
