@@ -81,7 +81,6 @@ func Load() (*Config, error) {
 	viper.SetDefault("source.s3_region", "us-east-1")
 	viper.SetDefault("source.large_file_threshold", 104857600)
 	viper.SetDefault("daemon.port", 8080)
-	viper.SetDefault("daemon.worker_count", 4)
 	viper.SetDefault("search.fts_weight", 0.5)
 	viper.SetDefault("search.fts_scale", 10.0)
 	viper.SetDefault("search.fts_min_boost", 0.3)
@@ -118,7 +117,6 @@ func Load() (*Config, error) {
 		S3Region:           viper.GetString("source.s3_region"),
 		LargeFileThreshold: viper.GetInt64("source.large_file_threshold"),
 		DaemonPort:         viper.GetInt("daemon.port"),
-		WorkerCount:        viper.GetInt("daemon.worker_count"),
 		SearchFTSWeight:    viper.GetFloat64("search.fts_weight"),
 		SearchFTSScale:     viper.GetFloat64("search.fts_scale"),
 		SearchFTSMinBoost:  viper.GetFloat64("search.fts_min_boost"),
