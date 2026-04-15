@@ -53,6 +53,34 @@ func (c *ConvertClient) Health(ctx context.Context) (*ConvertHealth, error) {
 	return &h, nil
 }
 
+// postFile is a helper for simple single-file-in/bytes-out requests.
+func (c *ConvertClient) postFile(ctx context.Context, path, filename string, data []byte, fields map[string]string) ([]byte, error) {
+	body, contentType, err := buildMultipart(filename, data, fields)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		c.BaseURL+path, bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", contentType)
+
+	resp, err := c.HTTP.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("convertsvc %s: %w", path, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("convertsvc %s: status %d: %s", path, resp.StatusCode, b)
+	}
+
+	return io.ReadAll(resp.Body)
+}
+
 func (c *ConvertClient) ConvertToText(ctx context.Context, filename string, data []byte) ([]byte, error) {
 	return c.postFile(ctx, "/convert/text", filename, data,
 		map[string]string{"target_format": "txt"})
@@ -131,30 +159,29 @@ func (c *ConvertClient) ExtractVideoFrames(ctx context.Context, filename string,
 	return frames, nil
 }
 
-// postFile is a helper for simple single-file-in/bytes-out requests.
-func (c *ConvertClient) postFile(ctx context.Context, path, filename string, data []byte, fields map[string]string) ([]byte, error) {
-	body, contentType, err := buildMultipart(filename, data, fields)
+type EmailAttachment struct {
+	Filename string `json:"filename"`
+	Mime     string `json:"mime"`
+	Data     string `json:"data"` // base64
+}
+
+type EmailResponse struct {
+	Subject     string            `json:"subject"`
+	From        string            `json:"from"`
+	To          string            `json:"to"`
+	Date        string            `json:"date"`
+	Body        string            `json:"body"`
+	Attachments []EmailAttachment `json:"attachments"`
+}
+
+func (c *ConvertClient) ParseEmail(ctx context.Context, filename string, data []byte) (*EmailResponse, error) {
+	result, err := c.postFile(ctx, "/convert/email", filename, data, nil)
 	if err != nil {
 		return nil, err
 	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		c.BaseURL+path, bytes.NewReader(body))
-	if err != nil {
-		return nil, err
+	var r EmailResponse
+	if err := json.Unmarshal(result, &r); err != nil {
+		return nil, fmt.Errorf("parse email response: %w", err)
 	}
-	req.Header.Set("Content-Type", contentType)
-
-	resp, err := c.HTTP.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("convertsvc %s: %w", path, err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		b, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("convertsvc %s: status %d: %s", path, resp.StatusCode, b)
-	}
-
-	return io.ReadAll(resp.Body)
+	return &r, nil
 }

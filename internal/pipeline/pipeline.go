@@ -23,6 +23,15 @@ type Config struct {
 	ChunkOverlap     int
 	MinChunkSize     int
 	VideoFrameRate   float64
+	syntheticData    map[string][]byte // path → bytes for email attachments
+}
+
+func (c Config) withSyntheticData(path string, data []byte) Config {
+	if c.syntheticData == nil {
+		c.syntheticData = make(map[string][]byte)
+	}
+	c.syntheticData[path] = data
+	return c
 }
 
 // Result is returned after a file has been processed.
@@ -33,6 +42,11 @@ type Result struct {
 }
 
 func readFile(ctx context.Context, cfg Config, path string) ([]byte, error) {
+	if cfg.syntheticData != nil {
+		if data, ok := cfg.syntheticData[path]; ok {
+			return data, nil
+		}
+	}
 	return cfg.Reader.Read(ctx, path)
 }
 
@@ -63,6 +77,8 @@ func Process(ctx context.Context, cfg Config, fi source.FileInfo) (Result, error
 		return processAudio(ctx, cfg, fi)
 	case "video":
 		return processVideo(ctx, cfg, fi)
+	case "email":
+		return processEmail(ctx, cfg, fi)
 	default:
 		return Result{
 			Skipped:    true,
