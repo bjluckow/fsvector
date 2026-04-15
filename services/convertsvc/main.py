@@ -135,6 +135,7 @@ async def convert_video_frames(
         result = subprocess.run([
             "ffmpeg", "-i", input_path,
             "-vf", f"fps={fps}",
+            "-pix_fmt", "yuvj420p",  # fix for iPhone HEVC non-full-range YUV
             "-frame_pts", "1",
             os.path.join(frames_dir, "frame_%06d.jpg"),
             "-y"
@@ -210,6 +211,21 @@ def _convert_image(input_path: str, output_path: str):
         )
 
 def _normalize_audio(input_path: str, output_path: str):
+    # first check if file has an audio stream
+    probe = subprocess.run([
+        "ffprobe", "-v", "error",
+        "-select_streams", "a",
+        "-show_entries", "stream=codec_type",
+        "-of", "default=noprint_wrappers=1:nokey=1",
+        input_path
+    ], capture_output=True, text=True)
+    
+    if not probe.stdout.strip():
+        raise HTTPException(
+            status_code=422,
+            detail="no audio stream found in file"
+        )
+    
     result = subprocess.run([
         "ffmpeg", "-i", input_path,
         "-ar", "16000",

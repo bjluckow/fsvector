@@ -28,7 +28,7 @@ func Split(text string, size, overlap, minSize int) []string {
 
 	for i < total {
 		end := i + size
-		if end > total {
+		if end >= total {
 			end = total
 		} else {
 			end = snapToWhitespace(runes, end, 50)
@@ -52,23 +52,23 @@ func Split(text string, size, overlap, minSize int) []string {
 // snapToWhitespace tries to snap pos to the nearest whitespace boundary
 // within window runes, searching backwards first then forwards.
 // Returns pos unchanged if no whitespace is found within the window.
-func snapToWhitespace(runes []rune, pos, window int) int {
-	total := len(runes)
-
-	// search backwards
-	for j := pos; j >= max(0, pos-window); j-- {
-		if unicode.IsSpace(runes[j]) {
-			return j
+func snapToWhitespace(text []rune, pos, radius int) int {
+	// ensure we never go out of bounds
+	if pos >= len(text) {
+		return len(text)
+	}
+	// search backwards for whitespace
+	for i := pos; i > pos-radius && i > 0; i-- {
+		if unicode.IsSpace(text[i]) {
+			return i
 		}
 	}
-
-	// search forwards
-	for j := pos; j < min(total, pos+window); j++ {
-		if unicode.IsSpace(runes[j]) {
-			return j
+	// search forwards for whitespace
+	for i := pos; i < pos+radius && i < len(text); i++ { // ← i < len(text) not i <= len(text)
+		if unicode.IsSpace(text[i]) {
+			return i
 		}
 	}
-
 	return pos
 }
 

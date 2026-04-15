@@ -21,6 +21,7 @@ services:
       resources:
         limits:
           memory: 1g
+    restart: unless-stopped
     environment:
       EMBED_MODEL: ${EMBED_MODEL:-clip-ViT-B-32}
       TRANSFORMERS_OFFLINE: "0"
@@ -42,6 +43,7 @@ services:
       resources:
         limits:
           memory: 512mb
+    restart: unless-stopped
     ports:
       - "8101:8001"
     healthcheck:
@@ -56,6 +58,7 @@ services:
       resources:
         limits:
           memory: 1g
+    restart: unless-stopped
     environment:
       WHISPER_MODEL: ${WHISPER_MODEL:-base.en}
     volumes:
@@ -75,6 +78,7 @@ services:
       resources:
         limits:
           memory: 2g
+    restart: unless-stopped
     environment:
       CAPTION_MODEL: ${CAPTION_MODEL:-Salesforce/blip-image-captioning-base}
       VISION_OCR_ENABLED: ${VISION_OCR_ENABLED:-true}
