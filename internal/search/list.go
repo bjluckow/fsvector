@@ -113,9 +113,12 @@ func List(ctx context.Context, db store.Querier, q ListQuery) ([]ListFile, error
 func Export(ctx context.Context, db store.Querier, q ListQuery) ([]api.ExportRow, error) {
 	sql := `
 		SELECT
-			path, source, modality, file_ext, mime_type,
-			embed_model, embedding, chunk_index, chunk_type,
-			text_content, metadata, indexed_at, file_modified_at
+			path, source, canonical_path,
+			content_hash, size, mime_type, modality,
+			file_name, file_ext, embed_model, embedding,
+			chunk_index, chunk_type, text_content,
+			metadata, indexed_at, file_modified_at,
+			file_created_at, deleted_at
 		FROM files
 		WHERE (canonical_path IS NULL OR canonical_path = '')
 	`
@@ -166,9 +169,12 @@ func Export(ctx context.Context, db store.Querier, q ListQuery) ([]api.ExportRow
 		var r api.ExportRow
 		var embedding pgvector.Vector
 		if err := rows.Scan(
-			&r.Path, &r.Source, &r.Modality, &r.Ext, &r.MimeType,
-			&r.EmbedModel, &embedding, &r.ChunkIndex, &r.ChunkType,
-			&r.TextContent, &r.Metadata, &r.IndexedAt, &r.ModifiedAt,
+			&r.Path, &r.Source, &r.CanonicalPath,
+			&r.ContentHash, &r.Size, &r.MimeType, &r.Modality,
+			&r.FileName, &r.Ext, &r.EmbedModel, &embedding,
+			&r.ChunkIndex, &r.ChunkType, &r.TextContent,
+			&r.Metadata, &r.IndexedAt, &r.ModifiedAt,
+			&r.CreatedAt, &r.DeletedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -183,9 +189,12 @@ func Export(ctx context.Context, db store.Querier, q ListQuery) ([]api.ExportRow
 func ExportStream(ctx context.Context, db store.Querier, q ListQuery, fn func(api.ExportRow) error) error {
 	sql := `
 		SELECT
-			path, source, modality, file_ext, mime_type,
-			embed_model, embedding, chunk_index, chunk_type,
-			text_content, metadata, indexed_at, file_modified_at
+			path, source, canonical_path,
+			content_hash, size, mime_type, modality,
+			file_name, file_ext, embed_model, embedding,
+			chunk_index, chunk_type, text_content,
+			metadata, indexed_at, file_modified_at,
+			file_created_at, deleted_at
 		FROM files
 		WHERE (canonical_path IS NULL OR canonical_path = '')
 	`
@@ -234,9 +243,12 @@ func ExportStream(ctx context.Context, db store.Querier, q ListQuery, fn func(ap
 		var r api.ExportRow
 		var embedding pgvector.Vector
 		if err := rows.Scan(
-			&r.Path, &r.Source, &r.Modality, &r.Ext, &r.MimeType,
-			&r.EmbedModel, &embedding, &r.ChunkIndex, &r.ChunkType,
-			&r.TextContent, &r.Metadata, &r.IndexedAt, &r.ModifiedAt,
+			&r.Path, &r.Source, &r.CanonicalPath,
+			&r.ContentHash, &r.Size, &r.MimeType, &r.Modality,
+			&r.FileName, &r.Ext, &r.EmbedModel, &embedding,
+			&r.ChunkIndex, &r.ChunkType, &r.TextContent,
+			&r.Metadata, &r.IndexedAt, &r.ModifiedAt,
+			&r.CreatedAt, &r.DeletedAt,
 		); err != nil {
 			return err
 		}

@@ -423,6 +423,7 @@ func (s *Server) handleExportFiles(w http.ResponseWriter, r *http.Request) {
 
 	err := search.ExportStream(r.Context(), s.pool, q, func(row api.ExportRow) error {
 		if err := enc.Encode(row); err != nil {
+			fmt.Printf("DEBUG encode error: %v\n", err)
 			return err
 		}
 		if canFlush {

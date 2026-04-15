@@ -56,17 +56,23 @@ type StatsResponse struct {
 }
 
 type ExportRow struct {
-	Path        string         `json:"path"`
-	Source      string         `json:"source"`
-	Modality    string         `json:"modality"`
-	Ext         string         `json:"ext"`
-	MimeType    string         `json:"mime_type"`
-	EmbedModel  string         `json:"embed_model"`
-	Embedding   []float32      `json:"embedding"`
-	ChunkIndex  int            `json:"chunk_index"`
-	ChunkType   *string        `json:"chunk_type,omitempty"`
-	TextContent *string        `json:"text_content,omitempty"`
-	Metadata    map[string]any `json:"metadata,omitempty"`
-	IndexedAt   time.Time      `json:"indexed_at"`
-	ModifiedAt  *time.Time     `json:"modified_at,omitempty"`
+	Path          string         `json:"path"`
+	Source        string         `json:"source"`
+	CanonicalPath *string        `json:"canonical_path,omitempty"`
+	ContentHash   string         `json:"content_hash"`
+	Size          int64          `json:"size"`
+	MimeType      string         `json:"mime_type"`
+	Modality      string         `json:"modality"`
+	FileName      string         `json:"file_name"`
+	Ext           string         `json:"file_ext"`
+	EmbedModel    string         `json:"embed_model"`
+	Embedding     []float32      `json:"embedding"`
+	ChunkIndex    int            `json:"chunk_index"`
+	ChunkType     *string        `json:"chunk_type,omitempty"`
+	TextContent   *string        `json:"text_content,omitempty"`
+	Metadata      map[string]any `json:"metadata,omitempty"`
+	IndexedAt     time.Time      `json:"indexed_at"`
+	ModifiedAt    *time.Time     `json:"modified_at,omitempty"`
+	CreatedAt     *time.Time     `json:"created_at,omitempty"`
+	DeletedAt     *time.Time     `json:"deleted_at,omitempty"`
 }
