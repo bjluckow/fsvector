@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -32,7 +33,9 @@ func main() {
 	fmt.Println("fsvectord starting")
 
 	// ── connect to services ───────────────────────────────────
-	embedClient := clients.NewEmbedClient(cfg.EmbedSvcURL)
+	httpClient := &http.Client{}
+
+	embedClient := clients.NewEmbedClient(cfg.EmbedSvcURL, httpClient)
 	health, err := embedClient.Health(ctx)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "fsvectord: embedsvc unreachable: %v\n", err)
@@ -40,7 +43,7 @@ func main() {
 	}
 	fmt.Printf("  embed model: %s (dim=%d)\n", health.Model, health.Dim)
 
-	convertClient := clients.NewConvertClient(cfg.ConvertSvcURL)
+	convertClient := clients.NewConvertClient(cfg.ConvertSvcURL, httpClient)
 	convertHealth, err := convertClient.Health(ctx)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "fsvectord: convertsvc unreachable: %v\n", err)
@@ -48,7 +51,7 @@ func main() {
 	}
 	fmt.Printf("  convert backends: %v\n", convertHealth.Backends)
 
-	transcribeClient := clients.NewTranscribeClient(cfg.TranscribeSvcURL)
+	transcribeClient := clients.NewTranscribeClient(cfg.TranscribeSvcURL, httpClient)
 	transcribeHealth, err := transcribeClient.Health(ctx)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "fsvectord: transcribesvc unreachable: %v\n", err)
@@ -56,7 +59,7 @@ func main() {
 	}
 	fmt.Printf("  transcribe model: %s\n", transcribeHealth.Model)
 
-	visionClient := clients.NewVisionClient(cfg.VisionSvcURL)
+	visionClient := clients.NewVisionClient(cfg.VisionSvcURL, httpClient)
 	visionHealth, err := visionClient.Health(ctx)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "fsvectord: visionsvc unreachable: %v\n", err)

@@ -15,10 +15,10 @@ type EmbedClient struct {
 	HTTP    *http.Client
 }
 
-func NewEmbedClient(baseURL string) *EmbedClient {
+func NewEmbedClient(baseURL string, httpClient *http.Client) *EmbedClient {
 	return &EmbedClient{
 		BaseURL: baseURL,
-		HTTP:    &http.Client{},
+		HTTP:    httpClient,
 	}
 }
 
@@ -56,6 +56,24 @@ func (c *EmbedClient) Health(ctx context.Context) (*EmbedHealth, error) {
 		return nil, fmt.Errorf("embedsvc health decode: %w", err)
 	}
 	return &h, nil
+}
+
+// EmbedDim returns the current embedding dimension from embedsvc.
+func (c *EmbedClient) EmbedDim(ctx context.Context) (int, error) {
+	health, err := c.Health(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("embed dim: %w", err)
+	}
+	return health.Dim, nil
+}
+
+// EmbedModel returns the current embedding model name.
+func (c *EmbedClient) EmbedModel(ctx context.Context) (string, error) {
+	health, err := c.Health(ctx)
+	if err != nil {
+		return "", fmt.Errorf("embed model: %w", err)
+	}
+	return health.Model, nil
 }
 
 // EmbedTexts returns one embedding vector per input string.

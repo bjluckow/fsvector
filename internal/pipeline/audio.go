@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/bjluckow/fsvector/internal/chunk"
 	"github.com/bjluckow/fsvector/internal/source"
 	"github.com/bjluckow/fsvector/internal/store"
+	"github.com/bjluckow/fsvector/pkg/chunk"
 )
 
 func processAudio(ctx context.Context, cfg Config, fi source.FileInfo) (Result, error) {
@@ -41,7 +41,7 @@ func processAudio(ctx context.Context, cfg Config, fi source.FileInfo) (Result, 
 		"language":         resp.Language,
 	}
 
-	var files []store.File
+	var files []store.UpsertFile
 	for i, c := range chunks {
 		f, err := processTextChunk(ctx, cfg, fi, c, i)
 		if err != nil {

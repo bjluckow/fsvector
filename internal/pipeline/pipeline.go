@@ -27,7 +27,7 @@ type Config struct {
 
 // Result is returned after a file has been processed.
 type Result struct {
-	Files      []store.File
+	Files      []store.UpsertFile
 	Skipped    bool
 	SkipReason string
 }

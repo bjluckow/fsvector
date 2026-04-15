@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-//go:embed sql/schema.sql
+//go:embed schema.sql
 var schemaTmpl string
 
 // Migrate applies the schema to the database, substituting the embedding

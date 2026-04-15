@@ -6,10 +6,10 @@ import (
 	"os"
 	"strings"
 
-	"github.com/bjluckow/fsvector/internal/chunk"
 	"github.com/bjluckow/fsvector/internal/clients"
 	"github.com/bjluckow/fsvector/internal/source"
 	"github.com/bjluckow/fsvector/internal/store"
+	"github.com/bjluckow/fsvector/pkg/chunk"
 )
 
 func processVideo(ctx context.Context, cfg Config, fi source.FileInfo) (Result, error) {
@@ -18,7 +18,7 @@ func processVideo(ctx context.Context, cfg Config, fi source.FileInfo) (Result, 
 		return Result{}, fmt.Errorf("read %s: %w", fi.Path, err)
 	}
 
-	var files []store.File
+	var files []store.UpsertFile
 
 	// frames
 	frames, err := cfg.ConvertClient.ExtractVideoFrames(ctx, fi.Name, data, cfg.VideoFrameRate)
@@ -54,16 +54,16 @@ func processVideoFrame(
 	cfg Config,
 	fi source.FileInfo,
 	frame clients.VideoFrame,
-) (store.File, error) {
+) (store.UpsertFile, error) {
 	vector, err := cfg.EmbedClient.EmbedImage(ctx, fi.Name, frame.Data)
 	if err != nil {
-		return store.File{}, fmt.Errorf("embed: %w", err)
+		return store.UpsertFile{}, fmt.Errorf("embed: %w", err)
 	}
 
 	captionText := describeImage(ctx, cfg, fi, frame.Data)
 	frameType := "frame"
 
-	return store.File{
+	return store.UpsertFile{
 		Path:           fi.Path,
 		Source:         cfg.Source,
 		ContentHash:    fi.Hash,
@@ -96,7 +96,7 @@ func processVideoAudio(
 	fi source.FileInfo,
 	videoData []byte,
 	chunkOffset int,
-) []store.File {
+) []store.UpsertFile {
 	audioData, err := cfg.ConvertClient.ExtractVideoAudio(ctx, fi.Name, videoData)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "    extract audio %s: %v\n", fi.Path, err)
@@ -114,7 +114,7 @@ func processVideoAudio(
 
 	transcriptType := "transcript"
 	chunks := chunk.Split(resp.Text, cfg.ChunkSize, cfg.ChunkOverlap, cfg.MinChunkSize)
-	var files []store.File
+	var files []store.UpsertFile
 	for i, c := range chunks {
 		f, err := processTextChunk(ctx, cfg, fi, c, chunkOffset+i)
 		if err != nil || f == nil {

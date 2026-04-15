@@ -9,7 +9,7 @@ import (
 	"github.com/pgvector/pgvector-go"
 )
 
-type File struct {
+type UpsertFile struct {
 	Path           string
 	Source         string
 	CanonicalPath  *string
@@ -55,7 +55,7 @@ func itemIndex(chunkType *string, modality string) int {
 
 // Upsert inserts or updates a file, its item, and its chunk atomically.
 // If CanonicalPath is set, only the files row is written (duplicate tracking).
-func Upsert(ctx context.Context, f File) error {
+func Upsert(ctx context.Context, f UpsertFile) error {
 	tx, err := pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
@@ -69,7 +69,7 @@ func Upsert(ctx context.Context, f File) error {
 	return tx.Commit(ctx)
 }
 
-func upsertTx(ctx context.Context, tx pgx.Tx, f File) error {
+func upsertTx(ctx context.Context, tx pgx.Tx, f UpsertFile) error {
 	// 1. upsert files row
 	var fileID int64
 	err := tx.QueryRow(ctx, `

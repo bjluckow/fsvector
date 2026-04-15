@@ -6,9 +6,9 @@ import (
 	"os"
 	"strings"
 
-	"github.com/bjluckow/fsvector/internal/chunk"
 	"github.com/bjluckow/fsvector/internal/source"
 	"github.com/bjluckow/fsvector/internal/store"
+	"github.com/bjluckow/fsvector/pkg/chunk"
 )
 
 func processImage(ctx context.Context, cfg Config, fi source.FileInfo) (Result, error) {
@@ -35,7 +35,7 @@ func processImage(ctx context.Context, cfg Config, fi source.FileInfo) (Result, 
 	captionText := describeImage(ctx, cfg, fi, data)
 	ocrFiles := extractImageText(ctx, cfg, fi, data, 1)
 
-	primaryRow := store.File{
+	primaryRow := store.UpsertFile{
 		Path:           fi.Path,
 		Source:         cfg.Source,
 		ContentHash:    fi.Hash,
@@ -52,7 +52,7 @@ func processImage(ctx context.Context, cfg Config, fi source.FileInfo) (Result, 
 		TextContent:    &captionText,
 	}
 
-	files := append([]store.File{primaryRow}, ocrFiles...)
+	files := append([]store.UpsertFile{primaryRow}, ocrFiles...)
 	return Result{Files: files}, nil
 }
 
@@ -83,7 +83,7 @@ func extractImageText(
 	fi source.FileInfo,
 	imageData []byte,
 	chunkOffset int,
-) []store.File {
+) []store.UpsertFile {
 	if cfg.VisionClient == nil {
 		return nil
 	}
@@ -94,7 +94,7 @@ func extractImageText(
 
 	chunks := chunk.Split(ocrResp.Text, cfg.ChunkSize, cfg.ChunkOverlap, cfg.MinChunkSize)
 	ocrType := "ocr"
-	var files []store.File
+	var files []store.UpsertFile
 	for i, c := range chunks {
 		f, err := processTextChunk(ctx, cfg, fi, c, chunkOffset+i)
 		if err != nil || f == nil {

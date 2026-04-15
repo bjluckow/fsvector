@@ -14,10 +14,10 @@ type VisionClient struct {
 	HTTP    *http.Client
 }
 
-func NewVisionClient(baseURL string) *VisionClient {
+func NewVisionClient(baseURL string, httpClient *http.Client) *VisionClient {
 	return &VisionClient{
 		BaseURL: baseURL,
-		HTTP:    &http.Client{},
+		HTTP:    httpClient,
 	}
 }
 

@@ -18,10 +18,10 @@ type ConvertClient struct {
 	HTTP    *http.Client
 }
 
-func NewConvertClient(baseURL string) *ConvertClient {
+func NewConvertClient(baseURL string, httpClient *http.Client) *ConvertClient {
 	return &ConvertClient{
 		BaseURL: baseURL,
-		HTTP:    &http.Client{},
+		HTTP:    httpClient,
 	}
 }
 

@@ -15,10 +15,10 @@ type TranscribeClient struct {
 	HTTP    *http.Client
 }
 
-func NewTranscribeClient(baseURL string) *TranscribeClient {
+func NewTranscribeClient(baseURL string, httpClient *http.Client) *TranscribeClient {
 	return &TranscribeClient{
 		BaseURL: baseURL,
-		HTTP:    &http.Client{},
+		HTTP:    httpClient,
 	}
 }
 

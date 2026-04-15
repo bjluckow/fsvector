@@ -109,7 +109,7 @@ func indexFile(
 		return fmt.Errorf("hash check: %w", err)
 	} else if isDupe && canonicalPath != fi.Path {
 		modality, _ := pipeline.Modality(fi.Ext)
-		f := store.File{
+		f := store.UpsertFile{
 			Path:           fi.Path,
 			Source:         pCfg.Source,
 			ContentHash:    fi.Hash,
