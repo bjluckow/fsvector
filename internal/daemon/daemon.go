@@ -13,7 +13,6 @@ import (
 )
 
 type Daemon struct {
-	pool        *pgxpool.Pool
 	src         source.Source
 	pCfg        pipeline.Config
 	embedClient *embed.Client
@@ -24,7 +23,6 @@ type Daemon struct {
 
 func New(pool *pgxpool.Pool, src source.Source, pCfg pipeline.Config, embedClient *embed.Client, port int) *Daemon {
 	return &Daemon{
-		pool:        pool,
 		src:         src,
 		pCfg:        pCfg,
 		embedClient: embedClient,
@@ -36,11 +34,11 @@ func New(pool *pgxpool.Pool, src source.Source, pCfg pipeline.Config, embedClien
 
 func (d *Daemon) Run(ctx context.Context) error {
 	// start HTTP server
-	srv := newServer(d.pool, d.embedClient, d.progress, d.trigger, d.src.URI())
+	srv := newServer(d.embedClient, d.progress, d.trigger, d.src.URI())
 	go srv.Serve(ctx, d.port)
 
 	// initial reindex
-	if err := Reindex(ctx, d.pool, d.pCfg, d.src, d.progress); err != nil {
+	if err := Reindex(ctx, d.pCfg, d.src, d.progress); err != nil {
 		return fmt.Errorf("reindex: %w", err)
 	}
 
@@ -73,7 +71,7 @@ func (d *Daemon) listenForTriggers(ctx context.Context) {
 			if d.progress.Running {
 				continue
 			}
-			if err := Reindex(ctx, d.pool, d.pCfg, d.src, d.progress); err != nil {
+			if err := Reindex(ctx, d.pCfg, d.src, d.progress); err != nil {
 				fmt.Fprintf(os.Stderr, "triggered reindex: %v\n", err)
 			}
 		}
@@ -88,7 +86,7 @@ func (d *Daemon) handleEvents(ctx context.Context, events <-chan source.Event) {
 		case e := <-events:
 			switch e.Kind {
 			case source.EventDelete:
-				if err := store.SoftDelete(ctx, d.pool, e.Path); err != nil {
+				if err := store.SoftDelete(ctx, e.Path); err != nil {
 					fmt.Fprintf(os.Stderr, "delete %s: %v\n", e.Path, err)
 				} else {
 					fmt.Printf("  deleted %s\n", e.Path)
@@ -111,12 +109,12 @@ func (d *Daemon) handleEvents(ctx context.Context, events <-chan source.Event) {
 				}
 
 				for _, f := range result.Files {
-					if err := store.Upsert(ctx, d.pool, f); err != nil {
+					if err := store.Upsert(ctx, f); err != nil {
 						fmt.Fprintf(os.Stderr, "  upsert %s chunk %d: %v\n", e.Path, f.ChunkIndex, err)
 						continue
 					}
 				}
-				if err := store.DeleteStaleChunks(ctx, d.pool, e.Path, d.pCfg.EmbedModel, len(result.Files)); err != nil {
+				if err := store.DeleteStaleChunks(ctx, e.Path, d.pCfg.EmbedModel, len(result.Files)); err != nil {
 					fmt.Fprintf(os.Stderr, "  stale chunks %s: %v\n", e.Path, err)
 				}
 				fmt.Printf("  %s %s (%s, %d chunks)\n", e.Kind, e.Path, result.Files[0].Modality, len(result.Files))

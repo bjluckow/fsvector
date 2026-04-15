@@ -11,7 +11,7 @@ import (
 )
 
 // Reindex diffs the source against the DB and brings the index into sync.
-func Reindex(ctx context.Context, db store.Querier, pCfg pipeline.Config, src source.Source, progress *Progress) error {
+func Reindex(ctx context.Context, pCfg pipeline.Config, src source.Source, progress *Progress) error {
 	progress.start()
 	defer progress.finish()
 
@@ -26,16 +26,16 @@ func Reindex(ctx context.Context, db store.Querier, pCfg pipeline.Config, src so
 
 	fsMap := buildFilepathMap(fsFiles)
 
-	dbFiles, err := store.LivePaths(ctx, db)
+	dbFiles, err := store.LivePaths(ctx)
 	if err != nil {
 		return fmt.Errorf("live paths: %w", err)
 	}
 
-	if err := deleteStale(ctx, db, fsMap, dbFiles, progress); err != nil {
+	if err := deleteStale(ctx, fsMap, dbFiles, progress); err != nil {
 		return err
 	}
 
-	if err := indexNew(ctx, db, pCfg, fsFiles, dbFiles, progress); err != nil {
+	if err := indexNew(ctx, pCfg, fsFiles, dbFiles, progress); err != nil {
 		return err
 	}
 
@@ -56,14 +56,13 @@ func buildFilepathMap(files []source.FileInfo) map[string]source.FileInfo {
 // deleteStale soft-deletes DB rows for files no longer in the source.
 func deleteStale(
 	ctx context.Context,
-	db store.Querier,
 	fsMap map[string]source.FileInfo,
 	dbFiles map[string]string,
 	progress *Progress,
 ) error {
 	for path := range dbFiles {
 		if _, exists := fsMap[path]; !exists {
-			if err := store.SoftDelete(ctx, db, path); err != nil {
+			if err := store.SoftDelete(ctx, path); err != nil {
 				fmt.Fprintf(os.Stderr, "    soft-delete %s: %v\n", path, err)
 				progress.addError(fmt.Sprintf("soft-delete %s: %v", path, err))
 				continue
@@ -78,7 +77,6 @@ func deleteStale(
 // indexNew processes files that are new or changed since last reindex.
 func indexNew(
 	ctx context.Context,
-	db store.Querier,
 	pCfg pipeline.Config,
 	fsFiles []source.FileInfo,
 	dbFiles map[string]string,
@@ -91,7 +89,7 @@ func indexNew(
 			continue
 		}
 
-		if err := indexFile(ctx, db, pCfg, fi, progress); err != nil {
+		if err := indexFile(ctx, pCfg, fi, progress); err != nil {
 			fmt.Fprintf(os.Stderr, "    %s: %v\n", fi.Path, err)
 			progress.addError(fmt.Sprintf("%s: %v", fi.Path, err))
 		}
@@ -102,13 +100,12 @@ func indexNew(
 // indexFile processes and upserts a single file.
 func indexFile(
 	ctx context.Context,
-	db store.Querier,
 	pCfg pipeline.Config,
 	fi source.FileInfo,
 	progress *Progress,
 ) error {
 	// dedup check
-	if canonicalPath, isDupe, err := store.FindByHash(ctx, db, fi.Hash); err != nil {
+	if canonicalPath, isDupe, err := store.FindByHash(ctx, fi.Hash); err != nil {
 		return fmt.Errorf("hash check: %w", err)
 	} else if isDupe && canonicalPath != fi.Path {
 		modality, _ := pipeline.Modality(fi.Ext)
@@ -125,7 +122,7 @@ func indexFile(
 			FileModifiedAt: &fi.ModifiedAt,
 			EmbedModel:     pCfg.EmbedModel,
 		}
-		if err := store.UpsertDuplicate(ctx, db, f, canonicalPath); err != nil {
+		if err := store.Upsert(ctx, f); err != nil {
 			return fmt.Errorf("dupe upsert: %w", err)
 		}
 		fmt.Printf("    duplicate %s -> %s\n", fi.Path, canonicalPath)
@@ -144,11 +141,11 @@ func indexFile(
 	}
 
 	for _, f := range result.Files {
-		if err := store.Upsert(ctx, db, f); err != nil {
+		if err := store.Upsert(ctx, f); err != nil {
 			return fmt.Errorf("upsert chunk %d: %w", f.ChunkIndex, err)
 		}
 	}
-	if err := store.DeleteStaleChunks(ctx, db, fi.Path, pCfg.EmbedModel, len(result.Files)); err != nil {
+	if err := store.DeleteStaleChunks(ctx, fi.Path, pCfg.EmbedModel, len(result.Files)); err != nil {
 		fmt.Fprintf(os.Stderr, "    stale chunks %s: %v\n", fi.Path, err)
 	}
 

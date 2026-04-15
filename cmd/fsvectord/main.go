@@ -74,8 +74,14 @@ func main() {
 	}
 	defer pool.Close()
 
+	if err := store.Init(ctx, cfg.DatabaseURL); err != nil {
+		fmt.Fprintf(os.Stderr, "fsvectord: db: %v\n", err)
+		os.Exit(1)
+	}
+	defer store.Close()
+
 	// ── check for dimension mismatch ──────────────────────────────────────────
-	existingDim, err := store.EmbeddingDim(ctx, pool)
+	existingDim, err := store.GetEmbeddingDim(ctx)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "fsvectord: dim check: %v\n", err)
 		os.Exit(1)
@@ -89,7 +95,7 @@ func main() {
 	}
 
 	// ── migrate ───────────────────────────────────────────────────────────────
-	if err := store.Migrate(ctx, pool, health.Dim); err != nil {
+	if err := store.Migrate(ctx, health.Dim); err != nil {
 		fmt.Fprintf(os.Stderr, "fsvectord: migrate: %v\n", err)
 		os.Exit(1)
 	}

@@ -1,11 +1,10 @@
-package search
+package store
 
 import (
 	"context"
 	"fmt"
 	"time"
 
-	"github.com/bjluckow/fsvector/internal/store"
 	"github.com/bjluckow/fsvector/pkg/api"
 	"github.com/pgvector/pgvector-go"
 )
@@ -22,7 +21,7 @@ type ListFile struct {
 	IsDuplicate bool
 }
 
-// ListQuery holds all list parameters.
+// ListQuery holds all list/export parameters.
 type ListQuery struct {
 	Limit          int
 	Offset         int
@@ -37,9 +36,10 @@ type ListQuery struct {
 }
 
 // List returns indexed files matching the query.
-func List(ctx context.Context, db store.Querier, q ListQuery) ([]ListFile, error) {
+// Returns one row per file (not per chunk).
+func List(ctx context.Context, q ListQuery) ([]ListFile, error) {
 	sql := `
-		SELECT
+		SELECT DISTINCT ON (path)
 			path,
 			modality,
 			file_ext,
@@ -48,8 +48,8 @@ func List(ctx context.Context, db store.Querier, q ListQuery) ([]ListFile, error
 			file_modified_at,
 			deleted_at,
 			canonical_path IS NOT NULL AS is_duplicate
-		FROM files
-		WHERE chunk_index = 0
+		FROM file_chunks
+		WHERE 1=1
 	`
 
 	args := []any{q.Limit, q.Offset}
@@ -86,7 +86,7 @@ func List(ctx context.Context, db store.Querier, q ListQuery) ([]ListFile, error
 
 	sql += " ORDER BY path LIMIT $1 OFFSET $2"
 
-	rows, err := db.Query(ctx, sql, args...)
+	rows, err := pool.Query(ctx, sql, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list: %w", err)
 	}
@@ -107,19 +107,17 @@ func List(ctx context.Context, db store.Querier, q ListQuery) ([]ListFile, error
 	return files, rows.Err()
 }
 
-// Export returns full file rows including embeddings, using the same
-// filters as List. Used for cross-instance sync and plugin data access.
-// WARNING: Can be extremely memory intensive without streaming, use ExportStream instead
-func Export(ctx context.Context, db store.Querier, q ListQuery) ([]api.ExportRow, error) {
+// buildExportSQL builds the shared SQL and args for Export and ExportStream.
+func buildExportSQL(q ListQuery) (string, []any) {
 	sql := `
 		SELECT
 			path, source, canonical_path,
 			content_hash, size, mime_type, modality,
 			file_name, file_ext, embed_model, embedding,
 			chunk_index, chunk_type, text_content,
-			metadata, indexed_at, file_modified_at,
+			chunk_metadata, indexed_at, file_modified_at,
 			file_created_at, deleted_at
-		FROM files
+		FROM file_chunks
 		WHERE (canonical_path IS NULL OR canonical_path = '')
 	`
 
@@ -156,9 +154,34 @@ func Export(ctx context.Context, db store.Querier, q ListQuery) ([]api.ExportRow
 	}
 
 	sql += " ORDER BY path, chunk_index"
+	return sql, args
+}
 
-	// no LIMIT for export — stream everything
-	rows, err := db.Query(ctx, sql, args...)
+func scanExportRow(rows interface {
+	Scan(dest ...any) error
+}) (api.ExportRow, error) {
+	var r api.ExportRow
+	var embedding pgvector.Vector
+	if err := rows.Scan(
+		&r.Path, &r.Source, &r.CanonicalPath,
+		&r.ContentHash, &r.Size, &r.MimeType, &r.Modality,
+		&r.FileName, &r.Ext, &r.EmbedModel, &embedding,
+		&r.ChunkIndex, &r.ChunkType, &r.TextContent,
+		&r.Metadata, &r.IndexedAt, &r.ModifiedAt,
+		&r.CreatedAt, &r.DeletedAt,
+	); err != nil {
+		return api.ExportRow{}, err
+	}
+	r.Embedding = embedding.Slice()
+	return r, nil
+}
+
+// Export returns full file rows including embeddings.
+// WARNING: Can be extremely memory intensive — use ExportStream instead.
+func Export(ctx context.Context, q ListQuery) ([]api.ExportRow, error) {
+	sql, args := buildExportSQL(q)
+
+	rows, err := pool.Query(ctx, sql, args...)
 	if err != nil {
 		return nil, fmt.Errorf("export: %w", err)
 	}
@@ -166,19 +189,10 @@ func Export(ctx context.Context, db store.Querier, q ListQuery) ([]api.ExportRow
 
 	var result []api.ExportRow
 	for rows.Next() {
-		var r api.ExportRow
-		var embedding pgvector.Vector
-		if err := rows.Scan(
-			&r.Path, &r.Source, &r.CanonicalPath,
-			&r.ContentHash, &r.Size, &r.MimeType, &r.Modality,
-			&r.FileName, &r.Ext, &r.EmbedModel, &embedding,
-			&r.ChunkIndex, &r.ChunkType, &r.TextContent,
-			&r.Metadata, &r.IndexedAt, &r.ModifiedAt,
-			&r.CreatedAt, &r.DeletedAt,
-		); err != nil {
+		r, err := scanExportRow(rows)
+		if err != nil {
 			return nil, err
 		}
-		r.Embedding = embedding.Slice()
 		result = append(result, r)
 	}
 	return result, rows.Err()
@@ -186,73 +200,20 @@ func Export(ctx context.Context, db store.Querier, q ListQuery) ([]api.ExportRow
 
 // ExportStream calls fn for each matching row as it comes from postgres.
 // Never holds more than one row in memory at a time.
-func ExportStream(ctx context.Context, db store.Querier, q ListQuery, fn func(api.ExportRow) error) error {
-	sql := `
-		SELECT
-			path, source, canonical_path,
-			content_hash, size, mime_type, modality,
-			file_name, file_ext, embed_model, embedding,
-			chunk_index, chunk_type, text_content,
-			metadata, indexed_at, file_modified_at,
-			file_created_at, deleted_at
-		FROM files
-		WHERE (canonical_path IS NULL OR canonical_path = '')
-	`
+func ExportStream(ctx context.Context, q ListQuery, fn func(api.ExportRow) error) error {
+	sql, args := buildExportSQL(q)
 
-	args := []any{}
-	idx := 1
-
-	if !q.IncludeDeleted {
-		sql += " AND deleted_at IS NULL"
-	}
-	if q.Modality != "" {
-		sql += fmt.Sprintf(" AND modality = $%d", idx)
-		args = append(args, q.Modality)
-		idx++
-	}
-	if q.Ext != "" {
-		sql += fmt.Sprintf(" AND file_ext = $%d", idx)
-		args = append(args, q.Ext)
-		idx++
-	}
-	if q.Source != "" {
-		sql += fmt.Sprintf(" AND source = $%d", idx)
-		args = append(args, q.Source)
-		idx++
-	}
-	if q.Since != nil {
-		sql += fmt.Sprintf(" AND file_modified_at >= $%d", idx)
-		args = append(args, q.Since)
-		idx++
-	}
-	if q.Before != nil {
-		sql += fmt.Sprintf(" AND file_modified_at <= $%d", idx)
-		args = append(args, q.Before)
-		idx++
-	}
-
-	sql += " ORDER BY path, chunk_index"
-
-	rows, err := db.Query(ctx, sql, args...)
+	rows, err := pool.Query(ctx, sql, args...)
 	if err != nil {
 		return fmt.Errorf("export: %w", err)
 	}
 	defer rows.Close()
 
 	for rows.Next() {
-		var r api.ExportRow
-		var embedding pgvector.Vector
-		if err := rows.Scan(
-			&r.Path, &r.Source, &r.CanonicalPath,
-			&r.ContentHash, &r.Size, &r.MimeType, &r.Modality,
-			&r.FileName, &r.Ext, &r.EmbedModel, &embedding,
-			&r.ChunkIndex, &r.ChunkType, &r.TextContent,
-			&r.Metadata, &r.IndexedAt, &r.ModifiedAt,
-			&r.CreatedAt, &r.DeletedAt,
-		); err != nil {
+		r, err := scanExportRow(rows)
+		if err != nil {
 			return err
 		}
-		r.Embedding = embedding.Slice()
 		if err := fn(r); err != nil {
 			return err
 		}

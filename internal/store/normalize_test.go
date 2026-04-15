@@ -1,9 +1,9 @@
-package search_test
+package store_test
 
 import (
 	"testing"
 
-	"github.com/bjluckow/fsvector/internal/search"
+	"github.com/bjluckow/fsvector/internal/store"
 )
 
 func approxEqual(a, b, tolerance float64) bool {
@@ -15,13 +15,13 @@ func approxEqual(a, b, tolerance float64) bool {
 }
 
 func TestNormalize_SingleModality(t *testing.T) {
-	results := []search.SearchResult{
+	results := []store.SearchResult{
 		{Modality: "text", Score: 0.9},
 		{Modality: "text", Score: 0.6},
 		{Modality: "text", Score: 0.3},
 	}
 
-	got := search.Normalize(results)
+	got := store.Normalize(results)
 
 	if !approxEqual(got[0].NormScore, 1.0, 1e-9) {
 		t.Errorf("expected 1.0, got %f", got[0].NormScore)
@@ -36,14 +36,14 @@ func TestNormalize_SingleModality(t *testing.T) {
 }
 
 func TestNormalize_MultipleModalities(t *testing.T) {
-	results := []search.SearchResult{
+	results := []store.SearchResult{
 		{Modality: "text", Score: 0.9},
 		{Modality: "text", Score: 0.5},
 		{Modality: "image", Score: 0.3},
 		{Modality: "image", Score: 0.1},
 	}
 
-	got := search.Normalize(results)
+	got := store.Normalize(results)
 
 	// text: max=0.9 min=0.5
 	if !approxEqual(got[0].NormScore, 1.0, 1e-9) {
@@ -63,28 +63,28 @@ func TestNormalize_MultipleModalities(t *testing.T) {
 }
 
 func TestNormalize_SingleResult(t *testing.T) {
-	results := []search.SearchResult{
+	results := []store.SearchResult{
 		{Modality: "image", Score: 0.25},
 	}
-	got := search.Normalize(results)
+	got := store.Normalize(results)
 	if !approxEqual(got[0].NormScore, 1.0, 1e-9) {
 		t.Errorf("expected 1.0 for single result, got %f", got[0].NormScore)
 	}
 }
 
 func TestNormalize_Empty(t *testing.T) {
-	got := search.Normalize([]search.SearchResult{})
+	got := store.Normalize([]store.SearchResult{})
 	if len(got) != 0 {
 		t.Errorf("expected empty slice, got %d results", len(got))
 	}
 }
 
 func TestNormalize_EqualScores(t *testing.T) {
-	results := []search.SearchResult{
+	results := []store.SearchResult{
 		{Modality: "text", Score: 0.7},
 		{Modality: "text", Score: 0.7},
 	}
-	got := search.Normalize(results)
+	got := store.Normalize(results)
 	for i, r := range got {
 		if r.NormScore != 1.0 {
 			t.Errorf("result %d: expected 1.0 for equal scores, got %f", i, r.NormScore)

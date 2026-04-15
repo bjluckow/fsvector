@@ -9,7 +9,6 @@ import (
 	"github.com/pgvector/pgvector-go"
 )
 
-// File represents a row in the files table.
 type File struct {
 	Path           string
 	Source         string
@@ -27,112 +26,135 @@ type File struct {
 	ChunkIndex     int
 	ChunkType      *string
 	Metadata       map[string]any
-	TextContent    *string // populated for text modality only
+	TextContent    *string
 }
 
-// Upsert inserts or updates a file row, including its embedding.
-// Matches on (path, chunk_index).
-func Upsert(ctx context.Context, db Querier, f File) error {
+func itemType(chunkType *string, modality string) string {
+	if chunkType != nil {
+		switch *chunkType {
+		case "frame":
+			return "frames"
+		case "transcript":
+			return "transcript"
+		}
+	}
+	switch modality {
+	case "audio":
+		return "transcript"
+	default:
+		return "whole"
+	}
+}
+
+func itemIndex(chunkType *string, modality string) int {
+	if chunkType != nil && *chunkType == "transcript" && modality == "video" {
+		return 1
+	}
+	return 0
+}
+
+// Upsert inserts or updates a file, its item, and its chunk atomically.
+// If CanonicalPath is set, only the files row is written (duplicate tracking).
+func Upsert(ctx context.Context, f File) error {
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	if err := upsertTx(ctx, tx, f); err != nil {
+		return err
+	}
+
+	return tx.Commit(ctx)
+}
+
+func upsertTx(ctx context.Context, tx pgx.Tx, f File) error {
+	// 1. upsert files row
+	var fileID int64
+	err := tx.QueryRow(ctx, `
+		INSERT INTO files (
+			path, source, canonical_path, modality,
+			file_name, file_ext, mime_type, size, content_hash,
+			file_created_at, file_modified_at, indexed_at, deleted_at
+		) VALUES (
+			$1, $2, $3, $4,
+			$5, $6, $7, $8, $9,
+			$10, $11, now(), NULL
+		)
+		ON CONFLICT (path) DO UPDATE SET
+			source           = EXCLUDED.source,
+			canonical_path   = EXCLUDED.canonical_path,
+			modality         = EXCLUDED.modality,
+			file_name        = EXCLUDED.file_name,
+			file_ext         = EXCLUDED.file_ext,
+			mime_type        = EXCLUDED.mime_type,
+			size             = EXCLUDED.size,
+			content_hash     = EXCLUDED.content_hash,
+			file_created_at  = EXCLUDED.file_created_at,
+			file_modified_at = EXCLUDED.file_modified_at,
+			indexed_at       = now(),
+			deleted_at       = NULL
+		RETURNING id
+	`,
+		f.Path, f.Source, f.CanonicalPath, f.Modality,
+		f.FileName, f.FileExt, f.MimeType, f.Size, f.ContentHash,
+		f.FileCreatedAt, f.FileModifiedAt,
+	).Scan(&fileID)
+	if err != nil {
+		return fmt.Errorf("upsert file %s: %w", f.Path, err)
+	}
+
+	// duplicate — only files row needed, no items or chunks
+	if f.CanonicalPath != nil && *f.CanonicalPath != "" {
+		return nil
+	}
+
+	// 2. upsert items row
+	it := itemType(f.ChunkType, f.Modality)
+	ii := itemIndex(f.ChunkType, f.Modality)
+
+	var itemID int64
+	err = tx.QueryRow(ctx, `
+		INSERT INTO items (file_id, item_type, item_index)
+		VALUES ($1, $2, $3)
+		ON CONFLICT (file_id, item_type, item_index) DO UPDATE SET
+			item_type = EXCLUDED.item_type
+		RETURNING id
+	`, fileID, it, ii).Scan(&itemID)
+	if err != nil {
+		return fmt.Errorf("upsert item %s: %w", f.Path, err)
+	}
+
+	// 3. upsert chunks row
 	var embedding *pgvector.Vector
 	if f.Embedding != nil {
 		v := pgvector.NewVector(f.Embedding)
 		embedding = &v
 	}
 
-	_, err := db.Exec(ctx, `
-		INSERT INTO files (
-			path, source, canonical_path,
-			content_hash, size, mime_type, modality,
-			file_name, file_ext, file_created_at, file_modified_at,
-			embed_model, embedding, chunk_index, chunk_type,
-			metadata, text_content, indexed_at, deleted_at
+	_, err = tx.Exec(ctx, `
+		INSERT INTO chunks (
+			item_id, chunk_index, chunk_type, embed_model,
+			embedding, text_content, metadata, indexed_at
 		) VALUES (
-			$1, $2, $3,
-			$4, $5, $6, $7,
-			$8, $9, $10, $11,
-			$12, $13, $14, $15,
-			$16, $17, now(), NULL
+			$1, $2, $3, $4,
+			$5, $6, $7, now()
 		)
-		ON CONFLICT (path, chunk_index) DO UPDATE SET
-			source           = EXCLUDED.source,
-			canonical_path   = EXCLUDED.canonical_path,
-			content_hash     = EXCLUDED.content_hash,
-			size             = EXCLUDED.size,
-			mime_type        = EXCLUDED.mime_type,
-			modality         = EXCLUDED.modality,
-			file_name        = EXCLUDED.file_name,
-			file_ext         = EXCLUDED.file_ext,
-			file_created_at  = EXCLUDED.file_created_at,
-			file_modified_at = EXCLUDED.file_modified_at,
-			embed_model      = EXCLUDED.embed_model,
-			embedding        = EXCLUDED.embedding,
-			chunk_type   	 = EXCLUDED.chunk_type,
-			metadata         = EXCLUDED.metadata,
-			text_content 	 = EXCLUDED.text_content,
-			indexed_at       = now(),
-			deleted_at       = NULL
+		ON CONFLICT (item_id, chunk_index) DO UPDATE SET
+			chunk_type   = EXCLUDED.chunk_type,
+			embed_model  = EXCLUDED.embed_model,
+			embedding    = EXCLUDED.embedding,
+			text_content = EXCLUDED.text_content,
+			metadata     = EXCLUDED.metadata,
+			indexed_at   = now()
 	`,
-		f.Path, f.Source, f.CanonicalPath,
-		f.ContentHash, f.Size, f.MimeType, f.Modality,
-		f.FileName, f.FileExt, f.FileCreatedAt, f.FileModifiedAt,
-		f.EmbedModel, embedding, f.ChunkIndex, f.ChunkType,
-		f.Metadata, f.TextContent,
+		itemID, f.ChunkIndex, f.ChunkType, f.EmbedModel,
+		embedding, f.TextContent, f.Metadata,
 	)
 	if err != nil {
-		return fmt.Errorf("upsert %s: %w", f.Path, err)
+		return fmt.Errorf("upsert chunk %s[%d]: %w", f.Path, f.ChunkIndex, err)
 	}
-	return nil
-}
 
-// FindByHash returns the canonical path for a given content hash, if one exists.
-// Used for deduplication — if a hash is already indexed, the new file is a duplicate.
-func FindByHash(ctx context.Context, db Querier, hash string) (string, bool, error) {
-	var path string
-	err := db.QueryRow(ctx, `
-		SELECT path FROM files
-		WHERE content_hash = $1
-		  AND canonical_path IS NULL
-		  AND deleted_at IS NULL
-		LIMIT 1
-	`, hash).Scan(&path)
-
-	if err == pgx.ErrNoRows {
-		return "", false, nil
-	}
-	if err != nil {
-		return "", false, fmt.Errorf("find by hash: %w", err)
-	}
-	return path, true, nil
-}
-
-// UpsertDuplicate inserts a file row that points to an existing canonical path.
-// No embedding is stored — the canonical row owns the vector.
-func UpsertDuplicate(ctx context.Context, db Querier, f File, canonicalPath string) error {
-	_, err := db.Exec(ctx, `
-		INSERT INTO files (
-			path, source, canonical_path,
-			content_hash, size, mime_type, modality,
-			file_name, file_ext, file_created_at, file_modified_at,
-			embed_model, chunk_index, indexed_at, deleted_at
-		) VALUES (
-			$1, $2, $3,
-			$4, $5, $6, $7,
-			$8, $9, $10, $11,
-			$12, 0, now(), NULL
-		)
-		ON CONFLICT (path, chunk_index) DO UPDATE SET
-			canonical_path   = EXCLUDED.canonical_path,
-			content_hash     = EXCLUDED.content_hash,
-			indexed_at       = now(),
-			deleted_at       = NULL
-	`,
-		f.Path, f.Source, canonicalPath,
-		f.ContentHash, f.Size, f.MimeType, f.Modality,
-		f.FileName, f.FileExt, f.FileCreatedAt, f.FileModifiedAt,
-		f.EmbedModel,
-	)
-	if err != nil {
-		return fmt.Errorf("upsert duplicate %s: %w", f.Path, err)
-	}
 	return nil
 }

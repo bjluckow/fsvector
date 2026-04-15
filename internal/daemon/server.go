@@ -11,14 +11,12 @@ import (
 	"time"
 
 	"github.com/bjluckow/fsvector/internal/clients/embed"
-	"github.com/bjluckow/fsvector/internal/search"
 	"github.com/bjluckow/fsvector/internal/store"
 	"github.com/bjluckow/fsvector/pkg/api"
 	"github.com/bjluckow/fsvector/pkg/parse"
 )
 
 type Server struct {
-	pool        store.Querier
 	embedClient *embed.Client
 	progress    *Progress
 	trigger     chan struct{}
@@ -26,9 +24,8 @@ type Server struct {
 	sourceURI   string
 }
 
-func newServer(pool store.Querier, embedClient *embed.Client, progress *Progress, trigger chan struct{}, sourceURI string) *Server {
+func newServer(embedClient *embed.Client, progress *Progress, trigger chan struct{}, sourceURI string) *Server {
 	return &Server{
-		pool:        pool,
 		embedClient: embedClient,
 		progress:    progress,
 		trigger:     trigger,
@@ -132,7 +129,7 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// build search query
-	q := search.SearchQuery{
+	q := store.SearchQuery{
 		Query:  req.Query,
 		Vector: vectors[0],
 		Limit:  req.Limit,
@@ -184,13 +181,13 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		q.MinScore = &req.MinScore
 	}
 
-	results, err := search.Search(r.Context(), s.pool, q)
+	results, err := store.Search(r.Context(), q)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	results = search.Normalize(results)
+	results = store.Normalize(results)
 
 	// convert to api types
 	apiResults := make([]api.SearchResult, len(results))
@@ -227,7 +224,7 @@ func (s *Server) handleFiles(w http.ResponseWriter, r *http.Request) {
 		fmt.Sscanf(v, "%d", &page)
 	}
 
-	q := search.ListQuery{
+	q := store.ListQuery{
 		Limit:          limit,
 		Offset:         (page - 1) * limit,
 		IncludeDeleted: query.Get("deleted") == "true",
@@ -249,7 +246,7 @@ func (s *Server) handleFiles(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	files, err := search.List(r.Context(), s.pool, q)
+	files, err := store.List(r.Context(), q)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -285,7 +282,7 @@ func (s *Server) handleFileDetail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	f, err := search.Show(r.Context(), s.pool, path)
+	f, err := store.Show(r.Context(), path)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return
@@ -315,7 +312,7 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	stats, err := search.GetStats(r.Context(), s.pool)
+	stats, err := store.GetStats(r.Context())
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -397,7 +394,7 @@ func (s *Server) handleExportFiles(w http.ResponseWriter, r *http.Request) {
 	}
 
 	query := r.URL.Query()
-	q := search.ListQuery{
+	q := store.ListQuery{
 		IncludeDeleted: query.Get("deleted") == "true",
 		Modality:       query.Get("modality"),
 		Ext:            query.Get("ext"),
@@ -421,7 +418,7 @@ func (s *Server) handleExportFiles(w http.ResponseWriter, r *http.Request) {
 	enc := json.NewEncoder(w)
 	flusher, canFlush := w.(http.Flusher)
 
-	err := search.ExportStream(r.Context(), s.pool, q, func(row api.ExportRow) error {
+	err := store.ExportStream(r.Context(), q, func(row api.ExportRow) error {
 		if err := enc.Encode(row); err != nil {
 			fmt.Printf("DEBUG encode error: %v\n", err)
 			return err

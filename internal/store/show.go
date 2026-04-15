@@ -1,11 +1,10 @@
-package search
+package store
 
 import (
 	"context"
 	"fmt"
 	"time"
 
-	"github.com/bjluckow/fsvector/internal/store"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -27,9 +26,9 @@ type ShowFile struct {
 }
 
 // Show returns detailed metadata for a single file path.
-func Show(ctx context.Context, db store.Querier, path string) (*ShowFile, error) {
+func Show(ctx context.Context, path string) (*ShowFile, error) {
 	var f ShowFile
-	err := db.QueryRow(ctx, `
+	err := pool.QueryRow(ctx, `
 		SELECT
 			path,
 			source,

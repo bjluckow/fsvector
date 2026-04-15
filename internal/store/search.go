@@ -1,15 +1,14 @@
-package search
+package store
 
 import (
 	"context"
 	"fmt"
 	"time"
 
-	"github.com/bjluckow/fsvector/internal/store"
 	"github.com/pgvector/pgvector-go"
 )
 
-// SearchResult is a single result from a similarity search.
+// SearchResult is a single result from a similarity
 type SearchResult struct {
 	Path       string
 	Modality   string
@@ -41,7 +40,7 @@ type SearchQuery struct {
 }
 
 // Search performs a cosine similarity search against live, canonical files.
-func Search(ctx context.Context, db store.Querier, q SearchQuery) ([]SearchResult, error) {
+func Search(ctx context.Context, q SearchQuery) ([]SearchResult, error) {
 	v := pgvector.NewVector(q.Vector)
 	embeddingCol := "embedding"
 
@@ -153,7 +152,7 @@ func Search(ctx context.Context, db store.Querier, q SearchQuery) ([]SearchResul
 		LIMIT $2 OFFSET $3
 	`, inner)
 
-	rows, err := db.Query(ctx, sql, args...)
+	rows, err := pool.Query(ctx, sql, args...)
 	if err != nil {
 		return nil, fmt.Errorf("search: %w", err)
 	}
