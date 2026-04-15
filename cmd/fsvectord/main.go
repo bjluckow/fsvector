@@ -9,10 +9,8 @@ import (
 
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
-	"github.com/bjluckow/fsvector/internal/clients/convert"
-	"github.com/bjluckow/fsvector/internal/clients/embed"
-	"github.com/bjluckow/fsvector/internal/clients/transcribe"
-	"github.com/bjluckow/fsvector/internal/clients/vision"
+
+	"github.com/bjluckow/fsvector/internal/clients"
 	"github.com/bjluckow/fsvector/internal/config"
 	"github.com/bjluckow/fsvector/internal/daemon"
 	"github.com/bjluckow/fsvector/internal/pipeline"
@@ -34,7 +32,7 @@ func main() {
 	fmt.Println("fsvectord starting")
 
 	// ── connect to services ───────────────────────────────────
-	embedClient := embed.NewClient(cfg.EmbedSvcURL)
+	embedClient := clients.NewEmbedClient(cfg.EmbedSvcURL)
 	health, err := embedClient.Health(ctx)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "fsvectord: embedsvc unreachable: %v\n", err)
@@ -42,7 +40,7 @@ func main() {
 	}
 	fmt.Printf("  embed model: %s (dim=%d)\n", health.Model, health.Dim)
 
-	convertClient := convert.NewClient(cfg.ConvertSvcURL)
+	convertClient := clients.NewConvertClient(cfg.ConvertSvcURL)
 	convertHealth, err := convertClient.Health(ctx)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "fsvectord: convertsvc unreachable: %v\n", err)
@@ -50,7 +48,7 @@ func main() {
 	}
 	fmt.Printf("  convert backends: %v\n", convertHealth.Backends)
 
-	transcribeClient := transcribe.NewClient(cfg.TranscribeSvcURL)
+	transcribeClient := clients.NewTranscribeClient(cfg.TranscribeSvcURL)
 	transcribeHealth, err := transcribeClient.Health(ctx)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "fsvectord: transcribesvc unreachable: %v\n", err)
@@ -58,7 +56,7 @@ func main() {
 	}
 	fmt.Printf("  transcribe model: %s\n", transcribeHealth.Model)
 
-	visionClient := vision.NewClient(cfg.VisionSvcURL)
+	visionClient := clients.NewVisionClient(cfg.VisionSvcURL)
 	visionHealth, err := visionClient.Health(ctx)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "fsvectord: visionsvc unreachable: %v\n", err)

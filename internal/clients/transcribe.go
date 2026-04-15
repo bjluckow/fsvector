@@ -1,4 +1,4 @@
-package transcribe
+package clients
 
 import (
 	"bytes"
@@ -10,19 +10,19 @@ import (
 	"net/http"
 )
 
-type Client struct {
+type TranscribeClient struct {
 	BaseURL string
 	HTTP    *http.Client
 }
 
-func NewClient(baseURL string) *Client {
-	return &Client{
+func NewTranscribeClient(baseURL string) *TranscribeClient {
+	return &TranscribeClient{
 		BaseURL: baseURL,
 		HTTP:    &http.Client{},
 	}
 }
 
-type HealthResponse struct {
+type TranscribeHealth struct {
 	Status   string `json:"status"`
 	Model    string `json:"model"`
 	Language string `json:"language"`
@@ -34,7 +34,7 @@ type TranscribeResponse struct {
 	DurationSeconds float64 `json:"duration_seconds"`
 }
 
-func (c *Client) Health(ctx context.Context) (*HealthResponse, error) {
+func (c *TranscribeClient) Health(ctx context.Context) (*TranscribeHealth, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.BaseURL+"/health", nil)
 	if err != nil {
 		return nil, err
@@ -45,14 +45,14 @@ func (c *Client) Health(ctx context.Context) (*HealthResponse, error) {
 	}
 	defer resp.Body.Close()
 
-	var h HealthResponse
+	var h TranscribeHealth
 	if err := json.NewDecoder(resp.Body).Decode(&h); err != nil {
 		return nil, fmt.Errorf("transcribesvc health decode: %w", err)
 	}
 	return &h, nil
 }
 
-func (c *Client) Transcribe(ctx context.Context, filename string, data []byte) (*TranscribeResponse, error) {
+func (c *TranscribeClient) Transcribe(ctx context.Context, filename string, data []byte) (*TranscribeResponse, error) {
 	var buf bytes.Buffer
 	mw := multipart.NewWriter(&buf)
 

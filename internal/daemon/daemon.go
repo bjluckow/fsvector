@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/bjluckow/fsvector/internal/clients/embed"
+	"github.com/bjluckow/fsvector/internal/clients"
 	"github.com/bjluckow/fsvector/internal/pipeline"
 	"github.com/bjluckow/fsvector/internal/source"
 	"github.com/bjluckow/fsvector/internal/store"
@@ -15,13 +15,13 @@ import (
 type Daemon struct {
 	src         source.Source
 	pCfg        pipeline.Config
-	embedClient *embed.Client
+	embedClient *clients.EmbedClient
 	progress    *Progress
 	trigger     chan struct{}
 	port        int
 }
 
-func New(pool *pgxpool.Pool, src source.Source, pCfg pipeline.Config, embedClient *embed.Client, port int) *Daemon {
+func New(pool *pgxpool.Pool, src source.Source, pCfg pipeline.Config, embedClient *clients.EmbedClient, port int) *Daemon {
 	return &Daemon{
 		src:         src,
 		pCfg:        pCfg,

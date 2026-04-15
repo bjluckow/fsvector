@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/bjluckow/fsvector/internal/chunk"
-	"github.com/bjluckow/fsvector/internal/clients/convert"
+	"github.com/bjluckow/fsvector/internal/clients"
 	"github.com/bjluckow/fsvector/internal/source"
 	"github.com/bjluckow/fsvector/internal/store"
 )
@@ -53,7 +53,7 @@ func processVideoFrame(
 	ctx context.Context,
 	cfg Config,
 	fi source.FileInfo,
-	frame convert.Frame,
+	frame clients.VideoFrame,
 ) (store.File, error) {
 	vector, err := cfg.EmbedClient.EmbedImage(ctx, fi.Name, frame.Data)
 	if err != nil {

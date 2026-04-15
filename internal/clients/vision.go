@@ -1,4 +1,4 @@
-package vision
+package clients
 
 import (
 	"bytes"
@@ -6,23 +6,22 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"mime/multipart"
 	"net/http"
 )
 
-type Client struct {
+type VisionClient struct {
 	BaseURL string
 	HTTP    *http.Client
 }
 
-func NewClient(baseURL string) *Client {
-	return &Client{
+func NewVisionClient(baseURL string) *VisionClient {
+	return &VisionClient{
 		BaseURL: baseURL,
 		HTTP:    &http.Client{},
 	}
 }
 
-type HealthResponse struct {
+type VisionHealth struct {
 	Status       string `json:"status"`
 	CaptionModel string `json:"caption_model"`
 	OCR          bool   `json:"ocr"`
@@ -36,7 +35,7 @@ type OCRResponse struct {
 	Text string `json:"text"`
 }
 
-func (c *Client) Health(ctx context.Context) (*HealthResponse, error) {
+func (c *VisionClient) Health(ctx context.Context) (*VisionHealth, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.BaseURL+"/health", nil)
 	if err != nil {
 		return nil, err
@@ -47,15 +46,15 @@ func (c *Client) Health(ctx context.Context) (*HealthResponse, error) {
 	}
 	defer resp.Body.Close()
 
-	var h HealthResponse
+	var h VisionHealth
 	if err := json.NewDecoder(resp.Body).Decode(&h); err != nil {
 		return nil, fmt.Errorf("visionsvc health decode: %w", err)
 	}
 	return &h, nil
 }
 
-func (c *Client) Caption(ctx context.Context, filename string, data []byte) (*CaptionResponse, error) {
-	body, contentType, err := buildMultipart(filename, data)
+func (c *VisionClient) Caption(ctx context.Context, filename string, data []byte) (*CaptionResponse, error) {
+	body, contentType, err := buildMultipart(filename, data, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -85,8 +84,8 @@ func (c *Client) Caption(ctx context.Context, filename string, data []byte) (*Ca
 	return &r, nil
 }
 
-func (c *Client) OCR(ctx context.Context, filename string, data []byte) (*OCRResponse, error) {
-	body, contentType, err := buildMultipart(filename, data)
+func (c *VisionClient) OCR(ctx context.Context, filename string, data []byte) (*OCRResponse, error) {
+	body, contentType, err := buildMultipart(filename, data, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -114,20 +113,4 @@ func (c *Client) OCR(ctx context.Context, filename string, data []byte) (*OCRRes
 		return nil, fmt.Errorf("visionsvc ocr decode: %w", err)
 	}
 	return &r, nil
-}
-
-func buildMultipart(filename string, data []byte) ([]byte, string, error) {
-	var buf bytes.Buffer
-	mw := multipart.NewWriter(&buf)
-
-	part, err := mw.CreateFormFile("file", filename)
-	if err != nil {
-		return nil, "", err
-	}
-	if _, err := part.Write(data); err != nil {
-		return nil, "", err
-	}
-	mw.Close()
-
-	return buf.Bytes(), mw.FormDataContentType(), nil
 }

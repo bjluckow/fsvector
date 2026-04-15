@@ -1,4 +1,4 @@
-package convert
+package clients
 
 import (
 	"bytes"
@@ -13,30 +13,30 @@ import (
 	"strings"
 )
 
-type Client struct {
+type ConvertClient struct {
 	BaseURL string
 	HTTP    *http.Client
 }
 
-func NewClient(baseURL string) *Client {
-	return &Client{
+func NewConvertClient(baseURL string) *ConvertClient {
+	return &ConvertClient{
 		BaseURL: baseURL,
 		HTTP:    &http.Client{},
 	}
 }
 
-type HealthResponse struct {
+type ConvertHealth struct {
 	Status   string   `json:"status"`
 	Backends []string `json:"backends"`
 }
 
-type Frame struct {
+type VideoFrame struct {
 	Index       int
 	TimestampMs int64
 	Data        []byte
 }
 
-func (c *Client) Health(ctx context.Context) (*HealthResponse, error) {
+func (c *ConvertClient) Health(ctx context.Context) (*ConvertHealth, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.BaseURL+"/health", nil)
 	if err != nil {
 		return nil, err
@@ -46,32 +46,32 @@ func (c *Client) Health(ctx context.Context) (*HealthResponse, error) {
 		return nil, fmt.Errorf("convertsvc health: %w", err)
 	}
 	defer resp.Body.Close()
-	var h HealthResponse
+	var h ConvertHealth
 	if err := json.NewDecoder(resp.Body).Decode(&h); err != nil {
 		return nil, fmt.Errorf("convertsvc health decode: %w", err)
 	}
 	return &h, nil
 }
 
-func (c *Client) ConvertToText(ctx context.Context, filename string, data []byte) ([]byte, error) {
+func (c *ConvertClient) ConvertToText(ctx context.Context, filename string, data []byte) ([]byte, error) {
 	return c.postFile(ctx, "/convert/text", filename, data,
 		map[string]string{"target_format": "txt"})
 }
 
-func (c *Client) ConvertToImage(ctx context.Context, filename string, data []byte) ([]byte, error) {
+func (c *ConvertClient) ConvertToImage(ctx context.Context, filename string, data []byte) ([]byte, error) {
 	return c.postFile(ctx, "/convert/image", filename, data,
 		map[string]string{"target_format": "jpg"})
 }
 
-func (c *Client) NormalizeAudio(ctx context.Context, filename string, data []byte) ([]byte, error) {
+func (c *ConvertClient) NormalizeAudio(ctx context.Context, filename string, data []byte) ([]byte, error) {
 	return c.postFile(ctx, "/convert/audio", filename, data, nil)
 }
 
-func (c *Client) ExtractVideoAudio(ctx context.Context, filename string, data []byte) ([]byte, error) {
+func (c *ConvertClient) ExtractVideoAudio(ctx context.Context, filename string, data []byte) ([]byte, error) {
 	return c.postFile(ctx, "/convert/video/audio", filename, data, nil)
 }
 
-func (c *Client) ExtractVideoFrames(ctx context.Context, filename string, data []byte, fps float64) ([]Frame, error) {
+func (c *ConvertClient) ExtractVideoFrames(ctx context.Context, filename string, data []byte, fps float64) ([]VideoFrame, error) {
 	body, contentType, err := buildMultipart(filename, data,
 		map[string]string{"fps": strconv.FormatFloat(fps, 'f', 2, 64)})
 	if err != nil {
@@ -103,7 +103,7 @@ func (c *Client) ExtractVideoFrames(ctx context.Context, filename string, data [
 	}
 
 	mr := multipart.NewReader(resp.Body, params["boundary"])
-	var frames []Frame
+	var frames []VideoFrame
 	for {
 		part, err := mr.NextPart()
 		if err == io.EOF {
@@ -121,7 +121,7 @@ func (c *Client) ExtractVideoFrames(ctx context.Context, filename string, data [
 		index, _ := strconv.Atoi(part.Header.Get("X-Frame-Index"))
 		tsMs, _ := strconv.ParseInt(part.Header.Get("X-Timestamp-Ms"), 10, 64)
 
-		frames = append(frames, Frame{
+		frames = append(frames, VideoFrame{
 			Index:       index,
 			TimestampMs: tsMs,
 			Data:        frameData,
@@ -132,7 +132,7 @@ func (c *Client) ExtractVideoFrames(ctx context.Context, filename string, data [
 }
 
 // postFile is a helper for simple single-file-in/bytes-out requests.
-func (c *Client) postFile(ctx context.Context, path, filename string, data []byte, fields map[string]string) ([]byte, error) {
+func (c *ConvertClient) postFile(ctx context.Context, path, filename string, data []byte, fields map[string]string) ([]byte, error) {
 	body, contentType, err := buildMultipart(filename, data, fields)
 	if err != nil {
 		return nil, err
@@ -157,27 +157,4 @@ func (c *Client) postFile(ctx context.Context, path, filename string, data []byt
 	}
 
 	return io.ReadAll(resp.Body)
-}
-
-// buildMultipart builds a multipart/form-data body with a file and optional fields.
-func buildMultipart(filename string, data []byte, fields map[string]string) ([]byte, string, error) {
-	var buf bytes.Buffer
-	mw := multipart.NewWriter(&buf)
-
-	part, err := mw.CreateFormFile("file", filename)
-	if err != nil {
-		return nil, "", err
-	}
-	if _, err := part.Write(data); err != nil {
-		return nil, "", err
-	}
-
-	for k, v := range fields {
-		if err := mw.WriteField(k, v); err != nil {
-			return nil, "", err
-		}
-	}
-	mw.Close()
-
-	return buf.Bytes(), mw.FormDataContentType(), nil
 }

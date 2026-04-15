@@ -1,4 +1,4 @@
-package embed
+package clients
 
 import (
 	"bytes"
@@ -10,19 +10,19 @@ import (
 	"net/http"
 )
 
-type Client struct {
+type EmbedClient struct {
 	BaseURL string
 	HTTP    *http.Client
 }
 
-func NewClient(baseURL string) *Client {
-	return &Client{
+func NewEmbedClient(baseURL string) *EmbedClient {
+	return &EmbedClient{
 		BaseURL: baseURL,
 		HTTP:    &http.Client{},
 	}
 }
 
-type HealthResponse struct {
+type EmbedHealth struct {
 	Status string `json:"status"`
 	Model  string `json:"model"`
 	Dim    int    `json:"dim"`
@@ -40,7 +40,7 @@ type imageEmbedResponse struct {
 	Embedding []float32 `json:"embedding"`
 }
 
-func (c *Client) Health(ctx context.Context) (*HealthResponse, error) {
+func (c *EmbedClient) Health(ctx context.Context) (*EmbedHealth, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.BaseURL+"/health", nil)
 	if err != nil {
 		return nil, err
@@ -51,7 +51,7 @@ func (c *Client) Health(ctx context.Context) (*HealthResponse, error) {
 	}
 	defer resp.Body.Close()
 
-	var h HealthResponse
+	var h EmbedHealth
 	if err := json.NewDecoder(resp.Body).Decode(&h); err != nil {
 		return nil, fmt.Errorf("embedsvc health decode: %w", err)
 	}
@@ -59,7 +59,7 @@ func (c *Client) Health(ctx context.Context) (*HealthResponse, error) {
 }
 
 // EmbedTexts returns one embedding vector per input string.
-func (c *Client) EmbedTexts(ctx context.Context, texts []string) ([][]float32, error) {
+func (c *EmbedClient) EmbedTexts(ctx context.Context, texts []string) ([][]float32, error) {
 	body, err := json.Marshal(textEmbedRequest{Texts: texts})
 	if err != nil {
 		return nil, err
@@ -91,7 +91,7 @@ func (c *Client) EmbedTexts(ctx context.Context, texts []string) ([][]float32, e
 }
 
 // EmbedImage returns a single embedding vector for the provided image bytes.
-func (c *Client) EmbedImage(ctx context.Context, filename string, data []byte) ([]float32, error) {
+func (c *EmbedClient) EmbedImage(ctx context.Context, filename string, data []byte) ([]float32, error) {
 	var buf bytes.Buffer
 	mw := multipart.NewWriter(&buf)
 

@@ -4,10 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/bjluckow/fsvector/internal/clients/convert"
-	"github.com/bjluckow/fsvector/internal/clients/embed"
-	"github.com/bjluckow/fsvector/internal/clients/transcribe"
-	"github.com/bjluckow/fsvector/internal/clients/vision"
+	"github.com/bjluckow/fsvector/internal/clients"
 	"github.com/bjluckow/fsvector/internal/source"
 	"github.com/bjluckow/fsvector/internal/store"
 )
@@ -15,10 +12,10 @@ import (
 // Config holds the dependencies for the pipeline.
 type Config struct {
 	Reader           source.FileReader
-	EmbedClient      *embed.Client
-	ConvertClient    *convert.Client
-	TranscribeClient *transcribe.Client
-	VisionClient     *vision.Client
+	EmbedClient      *clients.EmbedClient
+	ConvertClient    *clients.ConvertClient
+	TranscribeClient *clients.TranscribeClient
+	VisionClient     *clients.VisionClient
 	EmbedModel       string
 	Source           string
 	MinEmbedSize     int64

@@ -10,21 +10,21 @@ import (
 	"strings"
 	"time"
 
-	"github.com/bjluckow/fsvector/internal/clients/embed"
+	"github.com/bjluckow/fsvector/internal/clients"
 	"github.com/bjluckow/fsvector/internal/store"
 	"github.com/bjluckow/fsvector/pkg/api"
 	"github.com/bjluckow/fsvector/pkg/parse"
 )
 
 type Server struct {
-	embedClient *embed.Client
+	embedClient *clients.EmbedClient
 	progress    *Progress
 	trigger     chan struct{}
 	started     time.Time
 	sourceURI   string
 }
 
-func newServer(embedClient *embed.Client, progress *Progress, trigger chan struct{}, sourceURI string) *Server {
+func newServer(embedClient *clients.EmbedClient, progress *Progress, trigger chan struct{}, sourceURI string) *Server {
 	return &Server{
 		embedClient: embedClient,
 		progress:    progress,
