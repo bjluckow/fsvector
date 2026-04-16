@@ -16,13 +16,8 @@ import (
 	"github.com/bjluckow/fsvector/pkg/chunk"
 )
 
-func processEmail(ctx context.Context, cfg Config, fi source.FileInfo) (Result, error) {
-	data, err := cfg.Reader.Read(ctx, fi.Path)
-	if err != nil {
-		return Result{}, fmt.Errorf("read %s: %w", fi.Path, err)
-	}
-
-	parsed, err := cfg.ConvertClient.ParseEmail(ctx, fi.Name, data)
+func (pl Pipeline) processEmail(ctx context.Context, fi source.FileInfo, data []byte) (Result, error) {
+	parsed, err := pl.ConvertClient.ParseEmail(ctx, fi.Name, data)
 	if err != nil {
 		return Result{}, fmt.Errorf("parse email %s: %w", fi.Path, err)
 	}
@@ -33,9 +28,9 @@ func processEmail(ctx context.Context, cfg Config, fi source.FileInfo) (Result, 
 
 	// 1. embed body as text chunks
 	if strings.TrimSpace(parsed.Body) != "" {
-		bodyChunks := chunk.Split(parsed.Body, cfg.ChunkSize, cfg.ChunkOverlap, cfg.MinChunkSize)
+		bodyChunks := chunk.Split(parsed.Body, pl.ChunkSize, pl.ChunkOverlap, pl.MinChunkSize)
 		for i, c := range bodyChunks {
-			f, err := processTextChunk(ctx, cfg, fi, c, chunkOffset+i)
+			f, err := pl.processTextChunk(ctx, fi, c, chunkOffset+i)
 			if err != nil || f == nil {
 				continue
 			}
@@ -87,10 +82,7 @@ func processEmail(ctx context.Context, cfg Config, fi source.FileInfo) (Result, 
 			SourceURI:  fi.SourceURI,
 		}
 
-		// register attachment bytes so readFile can find them
-		attCfg := cfg.withSyntheticData(attFI.Path, attData)
-
-		attResult, err := Process(ctx, attCfg, attFI)
+		attResult, err := pl.ProcessFileData(ctx, attFI, attData)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "    attachment %s in %s: %v\n", att.Filename, fi.Path, err)
 			continue

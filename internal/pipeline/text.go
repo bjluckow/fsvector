@@ -9,12 +9,7 @@ import (
 	"github.com/bjluckow/fsvector/pkg/chunk"
 )
 
-func processText(ctx context.Context, cfg Config, fi source.FileInfo) (Result, error) {
-	data, err := readFile(ctx, cfg, fi.Path)
-	if err != nil {
-		return Result{}, fmt.Errorf("read %s: %w", fi.Path, err)
-	}
-
+func (pl Pipeline) processText(ctx context.Context, fi source.FileInfo, data []byte) (Result, error) {
 	var text string
 	plainExts := map[string]bool{
 		"txt": true, "md": true, "go": true, "py": true,
@@ -25,7 +20,7 @@ func processText(ctx context.Context, cfg Config, fi source.FileInfo) (Result, e
 	}
 
 	if !plainExts[fi.Ext] {
-		converted, err := cfg.ConvertClient.ConvertToText(ctx, fi.Name, data)
+		converted, err := pl.ConvertClient.ConvertToText(ctx, fi.Name, data)
 		if err != nil {
 			return Result{}, fmt.Errorf("convert %s: %w", fi.Path, err)
 		}
@@ -34,7 +29,7 @@ func processText(ctx context.Context, cfg Config, fi source.FileInfo) (Result, e
 		text = string(data)
 	}
 
-	chunks := chunk.Split(text, cfg.ChunkSize, cfg.ChunkOverlap, cfg.MinChunkSize)
+	chunks := chunk.Split(text, pl.ChunkSize, pl.ChunkOverlap, pl.MinChunkSize)
 	if len(chunks) == 0 {
 		return Result{
 			Skipped:    true,
@@ -44,7 +39,7 @@ func processText(ctx context.Context, cfg Config, fi source.FileInfo) (Result, e
 
 	var files []store.UpsertFile
 	for i, c := range chunks {
-		f, err := processTextChunk(ctx, cfg, fi, c, i)
+		f, err := pl.processTextChunk(ctx, fi, c, i)
 		if err != nil {
 			return Result{}, fmt.Errorf("chunk %d of %s: %w", i, fi.Path, err)
 		}
@@ -65,8 +60,8 @@ func processText(ctx context.Context, cfg Config, fi source.FileInfo) (Result, e
 
 // processTextChunk embeds a single text chunk and returns a store.File.
 // Returns nil if the embed service returns no vectors.
-func processTextChunk(ctx context.Context, cfg Config, fi source.FileInfo, text string, chunkIndex int) (*store.UpsertFile, error) {
-	vectors, err := cfg.EmbedClient.EmbedTexts(ctx, []string{text})
+func (pl Pipeline) processTextChunk(ctx context.Context, fi source.FileInfo, text string, chunkIndex int) (*store.UpsertFile, error) {
+	vectors, err := pl.EmbedClient.EmbedTexts(ctx, []string{text})
 	if err != nil {
 		return nil, fmt.Errorf("embed: %w", err)
 	}
@@ -76,7 +71,7 @@ func processTextChunk(ctx context.Context, cfg Config, fi source.FileInfo, text 
 
 	return &store.UpsertFile{
 		Path:           fi.Path,
-		Source:         cfg.Source,
+		Source:         pl.Source,
 		ContentHash:    fi.Hash,
 		Size:           fi.Size,
 		MimeType:       fi.MimeType,
@@ -85,7 +80,7 @@ func processTextChunk(ctx context.Context, cfg Config, fi source.FileInfo, text 
 		FileExt:        fi.Ext,
 		FileCreatedAt:  &fi.CreatedAt,
 		FileModifiedAt: &fi.ModifiedAt,
-		EmbedModel:     cfg.EmbedModel,
+		EmbedModel:     pl.EmbedModel,
 		Embedding:      vectors[0],
 		ChunkIndex:     chunkIndex,
 		TextContent:    &text,

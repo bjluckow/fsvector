@@ -129,7 +129,7 @@ func main() {
 	fmt.Printf("  source       : %s\n", src.URI())
 
 	// ── pipeline config ───────────────────────────────────────────────────────
-	pCfg := pipeline.Config{
+	pl := pipeline.Pipeline{
 		Reader:           src.Reader(),
 		EmbedClient:      embedClient,
 		ConvertClient:    convertClient,
@@ -152,5 +152,5 @@ func main() {
 	go srv.Serve(ctx, cfg.DaemonPort)
 
 	// ── start reindex goroutine per source ───────────────────────────────────
-	reindex.IndexAndPoll(ctx, src, pCfg, progress, trigger)
+	reindex.IndexAndPoll(ctx, src, pl, progress, trigger)
 }

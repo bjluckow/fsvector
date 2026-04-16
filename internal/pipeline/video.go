@@ -12,21 +12,16 @@ import (
 	"github.com/bjluckow/fsvector/pkg/chunk"
 )
 
-func processVideo(ctx context.Context, cfg Config, fi source.FileInfo) (Result, error) {
-	data, err := readFile(ctx, cfg, fi.Path)
-	if err != nil {
-		return Result{}, fmt.Errorf("read %s: %w", fi.Path, err)
-	}
-
+func (pl Pipeline) processVideo(ctx context.Context, fi source.FileInfo, data []byte) (Result, error) {
 	var files []store.UpsertFile
 
 	// frames
-	frames, err := cfg.ConvertClient.ExtractVideoFrames(ctx, fi.Name, data, cfg.VideoFrameRate)
+	frames, err := pl.ConvertClient.ExtractVideoFrames(ctx, fi.Name, data, pl.VideoFrameRate)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "    extract frames %s: %v\n", fi.Path, err)
 	} else {
 		for _, frame := range frames {
-			f, err := processVideoFrame(ctx, cfg, fi, frame)
+			f, err := pl.processVideoFrame(ctx, fi, frame)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "    frame %d %s: %v\n", frame.Index, fi.Path, err)
 				continue
@@ -36,7 +31,7 @@ func processVideo(ctx context.Context, cfg Config, fi source.FileInfo) (Result, 
 	}
 
 	// audio transcript
-	files = append(files, processVideoAudio(ctx, cfg, fi, data, len(frames))...)
+	files = append(files, pl.processVideoAudio(ctx, fi, data, len(frames))...)
 
 	if len(files) == 0 {
 		return Result{
@@ -49,23 +44,22 @@ func processVideo(ctx context.Context, cfg Config, fi source.FileInfo) (Result, 
 }
 
 // processVideoFrame embeds a single video frame and gets its caption.
-func processVideoFrame(
+func (pl Pipeline) processVideoFrame(
 	ctx context.Context,
-	cfg Config,
 	fi source.FileInfo,
 	frame clients.VideoFrame,
 ) (store.UpsertFile, error) {
-	vector, err := cfg.EmbedClient.EmbedImage(ctx, fi.Name, frame.Data)
+	vector, err := pl.EmbedClient.EmbedImage(ctx, fi.Name, frame.Data)
 	if err != nil {
 		return store.UpsertFile{}, fmt.Errorf("embed: %w", err)
 	}
 
-	captionText := describeImage(ctx, cfg, fi, frame.Data)
+	captionText := pl.describeImage(ctx, fi, frame.Data)
 	frameType := "frame"
 
 	return store.UpsertFile{
 		Path:           fi.Path,
-		Source:         cfg.Source,
+		Source:         pl.Source,
 		ContentHash:    fi.Hash,
 		Size:           fi.Size,
 		MimeType:       fi.MimeType,
@@ -74,7 +68,7 @@ func processVideoFrame(
 		FileExt:        fi.Ext,
 		FileCreatedAt:  &fi.CreatedAt,
 		FileModifiedAt: &fi.ModifiedAt,
-		EmbedModel:     cfg.EmbedModel,
+		EmbedModel:     pl.EmbedModel,
 		Embedding:      vector,
 		ChunkIndex:     frame.Index,
 		ChunkType:      &frameType,
@@ -82,7 +76,7 @@ func processVideoFrame(
 		Metadata: map[string]any{
 			"timestamp_ms": frame.TimestampMs,
 			"frame_index":  frame.Index,
-			"fps":          cfg.VideoFrameRate,
+			"fps":          pl.VideoFrameRate,
 		},
 	}, nil
 }
@@ -90,20 +84,19 @@ func processVideoFrame(
 // processVideoAudio extracts, transcribes and chunks the audio track of a video.
 // Returns transcript chunks starting at chunkOffset.
 // Non-fatal — returns nil on error or empty transcript.
-func processVideoAudio(
+func (pl Pipeline) processVideoAudio(
 	ctx context.Context,
-	cfg Config,
 	fi source.FileInfo,
 	videoData []byte,
 	chunkOffset int,
 ) []store.UpsertFile {
-	audioData, err := cfg.ConvertClient.ExtractVideoAudio(ctx, fi.Name, videoData)
+	audioData, err := pl.ConvertClient.ExtractVideoAudio(ctx, fi.Name, videoData)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "    extract audio %s: %v\n", fi.Path, err)
 		return nil
 	}
 
-	resp, err := cfg.TranscribeClient.Transcribe(ctx, fi.Name+".wav", audioData)
+	resp, err := pl.TranscribeClient.Transcribe(ctx, fi.Name+".wav", audioData)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "    transcribe %s: %v\n", fi.Path, err)
 		return nil
@@ -113,10 +106,10 @@ func processVideoAudio(
 	}
 
 	transcriptType := "transcript"
-	chunks := chunk.Split(resp.Text, cfg.ChunkSize, cfg.ChunkOverlap, cfg.MinChunkSize)
+	chunks := chunk.Split(resp.Text, pl.ChunkSize, pl.ChunkOverlap, pl.MinChunkSize)
 	var files []store.UpsertFile
 	for i, c := range chunks {
-		f, err := processTextChunk(ctx, cfg, fi, c, chunkOffset+i)
+		f, err := pl.processTextChunk(ctx, fi, c, chunkOffset+i)
 		if err != nil || f == nil {
 			continue
 		}

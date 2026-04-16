@@ -21,9 +21,9 @@ type Trigger struct {
 
 // IndexAndPoll manages the full lifecycle of a single source:
 // initial reindex, optional watching, and periodic polling.
-func IndexAndPoll(ctx context.Context, src source.Source, pCfg pipeline.Config, progress *Progress, trigger <-chan Trigger) {
+func IndexAndPoll(ctx context.Context, src source.Source, pl pipeline.Pipeline, progress *Progress, trigger <-chan Trigger) {
 	// initial reindex
-	if err := Reindex(ctx, src, pCfg, progress); err != nil {
+	if err := Reindex(ctx, src, pl, progress); err != nil {
 		fmt.Fprintf(os.Stderr, "reindex %s: %v\n", src.URI(), err)
 	}
 
@@ -35,7 +35,7 @@ func IndexAndPoll(ctx context.Context, src source.Source, pCfg pipeline.Config, 
 				fmt.Fprintf(os.Stderr, "watch %s: %v\n", src.URI(), err)
 			}
 		}()
-		go handleEvents(ctx, src, pCfg, events)
+		go handleEvents(ctx, src, pl, events)
 	}
 
 	// poll if interval set
@@ -48,13 +48,13 @@ func IndexAndPoll(ctx context.Context, src source.Source, pCfg pipeline.Config, 
 				return
 			case <-ticker.C:
 				if !progress.Running {
-					if err := Reindex(ctx, src, pCfg, progress); err != nil {
+					if err := Reindex(ctx, src, pl, progress); err != nil {
 						fmt.Fprintf(os.Stderr, "poll reindex %s: %v\n", src.URI(), err)
 					}
 				}
 			case t := <-trigger:
 				if !progress.Running {
-					Reindex(ctx, src, pCfg, progress)
+					Reindex(ctx, src, pl, progress)
 					if t.Purge {
 						store.PurgeSoftDeleted(ctx)
 					}
@@ -67,7 +67,7 @@ func IndexAndPoll(ctx context.Context, src source.Source, pCfg pipeline.Config, 
 }
 
 // Reindex diffs the source against the DB and brings the index into sync.
-func Reindex(ctx context.Context, src source.Source, pCfg pipeline.Config, progress *Progress) error {
+func Reindex(ctx context.Context, src source.Source, pl pipeline.Pipeline, progress *Progress) error {
 	progress.start()
 	defer progress.finish()
 
@@ -101,7 +101,7 @@ func Reindex(ctx context.Context, src source.Source, pCfg pipeline.Config, progr
 		return err
 	}
 
-	return indexNew(ctx, pCfg, fsFiles, dbFiles, progress)
+	return indexNew(ctx, pl, fsFiles, dbFiles, progress)
 }
 
 // modalityPriority returns processing order — lower is higher priority.
@@ -157,7 +157,7 @@ func deleteStale(
 
 func indexNew(
 	ctx context.Context,
-	pCfg pipeline.Config,
+	pl pipeline.Pipeline,
 	fsFiles []source.FileInfo,
 	dbFiles map[string]string,
 	progress *Progress,
@@ -168,7 +168,7 @@ func indexNew(
 			progress.incSkipped()
 			continue
 		}
-		if err := indexFile(ctx, pCfg, fi, progress); err != nil {
+		if err := indexFile(ctx, pl, fi, progress); err != nil {
 			fmt.Fprintf(os.Stderr, "    %s: %v\n", fi.Path, err)
 			progress.addError(fmt.Sprintf("%s: %v", fi.Path, err))
 		}
@@ -178,7 +178,7 @@ func indexNew(
 
 func indexFile(
 	ctx context.Context,
-	pCfg pipeline.Config,
+	pl pipeline.Pipeline,
 	fi source.FileInfo,
 	progress *Progress,
 ) error {
@@ -210,7 +210,7 @@ func indexFile(
 		return nil
 	}
 
-	result, err := pipeline.Process(ctx, pCfg, fi)
+	result, err := pl.ReadAndProcessFile(ctx, fi)
 	if err != nil {
 		return fmt.Errorf("pipeline: %w", err)
 	}
@@ -225,7 +225,7 @@ func indexFile(
 			return fmt.Errorf("upsert chunk %d: %w", f.ChunkIndex, err)
 		}
 	}
-	if err := store.DeleteStaleChunks(ctx, fi.Path, pCfg.EmbedModel, len(result.Files)); err != nil {
+	if err := store.DeleteStaleChunks(ctx, fi.Path, pl.EmbedModel, len(result.Files)); err != nil {
 		fmt.Fprintf(os.Stderr, "    stale chunks %s: %v\n", fi.Path, err)
 	}
 
@@ -246,7 +246,7 @@ func modalityOrDefault(ext string) string {
 func handleEvents(
 	ctx context.Context,
 	src source.Source,
-	pCfg pipeline.Config,
+	pl pipeline.Pipeline,
 	events <-chan source.Event,
 ) {
 	for {
@@ -268,7 +268,7 @@ func handleEvents(
 					fmt.Fprintf(os.Stderr, "  stat %s: %v\n", e.Path, err)
 					continue
 				}
-				result, err := pipeline.Process(ctx, pCfg, fi)
+				result, err := pl.ReadAndProcessFile(ctx, fi)
 				if err != nil {
 					fmt.Fprintf(os.Stderr, "  pipeline %s: %v\n", e.Path, err)
 					continue
@@ -283,7 +283,7 @@ func handleEvents(
 					}
 				}
 				if err := store.DeleteStaleChunks(ctx, e.Path,
-					pCfg.EmbedModel, len(result.Files)); err != nil {
+					pl.EmbedModel, len(result.Files)); err != nil {
 					fmt.Fprintf(os.Stderr, "  stale chunks %s: %v\n", e.Path, err)
 				}
 				fmt.Printf("  %s %s (%s, %d chunks)\n",
