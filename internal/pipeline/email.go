@@ -12,6 +12,7 @@ import (
 
 	"github.com/bjluckow/fsvector/internal/source"
 	"github.com/bjluckow/fsvector/internal/store"
+	"github.com/bjluckow/fsvector/pkg/api"
 	"github.com/bjluckow/fsvector/pkg/chunk"
 )
 
@@ -128,7 +129,7 @@ func processEmail(ctx context.Context, cfg Config, fi source.FileInfo) (Result, 
 // attachmentPath returns a synthetic path for an email attachment.
 // Uses :: as separator since it won't appear in S3 or local paths.
 func attachmentPath(emailPath, filename string) string {
-	return emailPath + "::" + filename
+	return emailPath + api.AttachmentSep + filename
 }
 
 // hashBytes returns a simple hash of bytes for dedup detection.

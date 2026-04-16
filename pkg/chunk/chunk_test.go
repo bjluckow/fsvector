@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/bjluckow/fsvector/internal/chunk"
+	"github.com/bjluckow/fsvector/pkg/chunk"
 )
 
 func TestSplit_ShortText(t *testing.T) {

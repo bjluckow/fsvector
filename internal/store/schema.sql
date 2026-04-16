@@ -27,7 +27,8 @@ CREATE TABLE IF NOT EXISTS items (
     size         BIGINT,
     content_hash TEXT,
     item_index   INT NOT NULL DEFAULT 0,
-    metadata     JSONB
+    metadata     JSONB,
+    UNIQUE (file_id, item_type, item_index)
 );
 
 CREATE TABLE IF NOT EXISTS chunks (
@@ -40,7 +41,6 @@ CREATE TABLE IF NOT EXISTS chunks (
     text_content TEXT,
     metadata     JSONB,
     indexed_at   TIMESTAMPTZ DEFAULT now(),
-
     UNIQUE (item_id, chunk_index)
 );
 

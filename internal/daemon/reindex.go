@@ -4,10 +4,13 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"sort"
+	"strings"
 
 	"github.com/bjluckow/fsvector/internal/pipeline"
 	"github.com/bjluckow/fsvector/internal/source"
 	"github.com/bjluckow/fsvector/internal/store"
+	"github.com/bjluckow/fsvector/pkg/api"
 )
 
 // Reindex diffs the source against the DB and brings the index into sync.
@@ -62,6 +65,9 @@ func deleteStale(
 ) error {
 	for path := range dbFiles {
 		if _, exists := fsMap[path]; !exists {
+			if strings.Contains(path, api.AttachmentSep) {
+				continue // never soft-delete attachment rows
+			}
 			if err := store.SoftDelete(ctx, path); err != nil {
 				fmt.Fprintf(os.Stderr, "    soft-delete %s: %v\n", path, err)
 				progress.addError(fmt.Sprintf("soft-delete %s: %v", path, err))
@@ -74,6 +80,24 @@ func deleteStale(
 	return nil
 }
 
+func priorityOrder(ext string) int {
+	modality, _ := pipeline.Modality(ext)
+	switch modality {
+	case "text":
+		return 0
+	case "image":
+		return 1
+	case "audio":
+		return 2
+	case "video":
+		return 3
+	case "email":
+		return 4
+	default:
+		return 5
+	}
+}
+
 // indexNew processes files that are new or changed since last reindex.
 func indexNew(
 	ctx context.Context,
@@ -82,6 +106,11 @@ func indexNew(
 	dbFiles map[string]string,
 	progress *Progress,
 ) error {
+	// sort files by modality priority to optimize indexing order
+	sort.Slice(fsFiles, func(i, j int) bool {
+		return priorityOrder(fsFiles[i].Ext) < priorityOrder(fsFiles[j].Ext)
+	})
+
 	for _, fi := range fsFiles {
 		existingHash, inDB := dbFiles[fi.Path]
 		if inDB && existingHash == fi.Hash {

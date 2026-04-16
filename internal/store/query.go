@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/bjluckow/fsvector/pkg/api"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -34,8 +35,9 @@ func LivePaths(ctx context.Context) (map[string]string, error) {
 		SELECT path, content_hash
 		FROM files
 		WHERE deleted_at IS NULL
-		  AND canonical_path IS NULL
-	`)
+		AND canonical_path IS NULL
+		AND path NOT LIKE '%' || $1 || '%'
+	`, api.AttachmentSep)
 	if err != nil {
 		return nil, fmt.Errorf("live paths: %w", err)
 	}
