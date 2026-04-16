@@ -1,11 +1,11 @@
-package fsindex_test
+package fswalk_test
 
 import (
 	"os"
 	"path/filepath"
 	"testing"
 
-	"github.com/bjluckow/fsvector/internal/fsindex"
+	"github.com/bjluckow/fsvector/internal/fswalk"
 )
 
 func TestWalk(t *testing.T) {
@@ -26,7 +26,7 @@ func TestWalk(t *testing.T) {
 		}
 	}
 
-	results, err := fsindex.Walk(root)
+	results, err := fswalk.Walk(root)
 	if err != nil {
 		t.Fatalf("Walk error: %v", err)
 	}
@@ -52,7 +52,7 @@ func TestWalk(t *testing.T) {
 	}
 
 	// verify hashes are deterministic
-	results2, err := fsindex.Walk(root)
+	results2, err := fswalk.Walk(root)
 	if err != nil {
 		t.Fatal(err)
 	}

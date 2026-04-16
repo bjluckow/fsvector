@@ -1,4 +1,4 @@
-package daemon
+package server
 
 import (
 	"context"
@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/bjluckow/fsvector/internal/clients"
+	"github.com/bjluckow/fsvector/internal/reindex"
 	"github.com/bjluckow/fsvector/internal/store"
 	"github.com/bjluckow/fsvector/pkg/api"
 	"github.com/bjluckow/fsvector/pkg/parse"
@@ -18,13 +19,13 @@ import (
 
 type Server struct {
 	embedClient *clients.EmbedClient
-	progress    *Progress
-	trigger     chan struct{}
+	progress    *reindex.Progress
+	trigger     chan<- reindex.Trigger // send-only
 	started     time.Time
 	sourceURI   string
 }
 
-func newServer(embedClient *clients.EmbedClient, progress *Progress, trigger chan struct{}, sourceURI string) *Server {
+func New(embedClient *clients.EmbedClient, progress *reindex.Progress, trigger chan<- reindex.Trigger, sourceURI string) *Server {
 	return &Server{
 		embedClient: embedClient,
 		progress:    progress,
@@ -72,7 +73,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
-	snap := s.progress.snapshot()
+	snap := s.progress.Snapshot()
 	json.NewEncoder(w).Encode(map[string]any{
 		"status":     statusString(snap.Running),
 		"source":     s.sourceURI,
@@ -86,8 +87,11 @@ func (s *Server) handleReindex(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+
+	purge := r.URL.Query().Get("purge") == "true"
+
 	select {
-	case s.trigger <- struct{}{}:
+	case s.trigger <- reindex.Trigger{Purge: purge}:
 		json.NewEncoder(w).Encode(map[string]string{"status": "triggered"})
 	default:
 		json.NewEncoder(w).Encode(map[string]string{"status": "already running"})

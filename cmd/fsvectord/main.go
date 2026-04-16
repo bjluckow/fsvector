@@ -13,8 +13,9 @@ import (
 
 	"github.com/bjluckow/fsvector/internal/clients"
 	"github.com/bjluckow/fsvector/internal/config"
-	"github.com/bjluckow/fsvector/internal/daemon"
 	"github.com/bjluckow/fsvector/internal/pipeline"
+	"github.com/bjluckow/fsvector/internal/reindex"
+	"github.com/bjluckow/fsvector/internal/server"
 	"github.com/bjluckow/fsvector/internal/source"
 	"github.com/bjluckow/fsvector/internal/store"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -102,7 +103,7 @@ func main() {
 	}
 	fmt.Println("  schema ok")
 
-	// ── load and reconcile data source─────────────────────────────────────────
+	// ── sources ───────────────────────────────────────────────────────────────
 
 	var src source.Source
 	switch cfg.SourceType {
@@ -119,13 +120,15 @@ func main() {
 			Bucket:             cfg.S3Bucket,
 			Prefix:             cfg.S3Prefix,
 			LargeFileThreshold: cfg.LargeFileThreshold,
+			PollInterval:       0,
 		})
-		fmt.Printf("  source       : %s\n", src.URI())
 	default:
-		src = source.NewLocalSource(cfg.WatchPath)
-		fmt.Printf("  source       : %s\n", cfg.WatchPath)
+		src = source.NewLocalSource(cfg.WatchPath, true, 0)
 	}
 
+	fmt.Printf("  source       : %s\n", src.URI())
+
+	// ── pipeline config ───────────────────────────────────────────────────────
 	pCfg := pipeline.Config{
 		Reader:           src.Reader(),
 		EmbedClient:      embedClient,
@@ -133,7 +136,6 @@ func main() {
 		TranscribeClient: transcribeClient,
 		VisionClient:     visionClient,
 		EmbedModel:       health.Model,
-		Source:           cfg.SourceType,
 		MinEmbedSize:     cfg.MinEmbedSize,
 		ChunkSize:        cfg.ChunkSize,
 		ChunkOverlap:     cfg.ChunkOverlap,
@@ -141,10 +143,14 @@ func main() {
 		VideoFrameRate:   cfg.VideoFrameRate,
 	}
 
-	// ── run ───────────────────────────────────────────────────────────────────
-	d := daemon.New(pool, src, pCfg, embedClient, cfg.DaemonPort)
-	if err := d.Run(ctx); err != nil {
-		fmt.Fprintf(os.Stderr, "fsvectord: %v\n", err)
-		os.Exit(1)
-	}
+	// ── progress + trigger (single for now, multi-source later) ──────────────
+	progress := &reindex.Progress{}
+	trigger := make(chan reindex.Trigger, 1)
+
+	// ── start HTTP server ─────────────────────────────────────────────────────
+	srv := server.New(embedClient, progress, trigger, src.URI())
+	go srv.Serve(ctx, cfg.DaemonPort)
+
+	// ── start reindex goroutine per source ───────────────────────────────────
+	reindex.IndexAndPoll(ctx, src, pCfg, progress, trigger)
 }

@@ -24,6 +24,7 @@ type S3Config struct {
 	Bucket             string
 	Prefix             string
 	LargeFileThreshold int64
+	PollInterval       time.Duration
 }
 
 // S3Source implements Source for S3 buckets.
@@ -113,6 +114,8 @@ func (s *S3Source) URI() string {
 	}
 	return fmt.Sprintf("s3://%s", s.cfg.Bucket)
 }
+
+func (s *S3Source) PollInterval() time.Duration { return s.cfg.PollInterval }
 
 // s3URI returns the full S3 URI for a key.
 func s3URI(bucket, key string) string {

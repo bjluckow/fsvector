@@ -1,4 +1,4 @@
-package fswatch
+package fswalk
 
 import (
 	"context"

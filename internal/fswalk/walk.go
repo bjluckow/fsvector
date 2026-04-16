@@ -1,4 +1,4 @@
-package fsindex
+package fswalk
 
 import (
 	"crypto/sha256"

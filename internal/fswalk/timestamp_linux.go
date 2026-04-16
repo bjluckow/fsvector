@@ -1,6 +1,6 @@
 //go:build linux
 
-package fsindex
+package fswalk
 
 import (
 	"io/fs"

@@ -1,6 +1,6 @@
 //go:build darwin
 
-package fsindex
+package fswalk
 
 import (
 	"io/fs"
