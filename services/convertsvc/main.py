@@ -4,10 +4,16 @@ import subprocess
 import tempfile
 from pathlib import Path
 from email import message_from_bytes
+import email as email_lib
+import base64
+import extract_msg
+import tempfile
 
 import magic
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.responses import Response, StreamingResponse
+
+
 
 app = FastAPI()
 
@@ -135,6 +141,7 @@ async def convert_video_frames(
         result = subprocess.run([
             "ffmpeg", "-i", input_path,
             "-vf", f"fps={fps}",
+            "-pix_fmt", "yuvj420p",  # fix for iPhone HEVC non-full-range YUV
             "-frame_pts", "1",
             os.path.join(frames_dir, "frame_%06d.jpg"),
             "-y"
@@ -210,6 +217,21 @@ def _convert_image(input_path: str, output_path: str):
         )
 
 def _normalize_audio(input_path: str, output_path: str):
+    # first check if file has an audio stream
+    probe = subprocess.run([
+        "ffprobe", "-v", "error",
+        "-select_streams", "a",
+        "-show_entries", "stream=codec_type",
+        "-of", "default=noprint_wrappers=1:nokey=1",
+        input_path
+    ], capture_output=True, text=True)
+    
+    if not probe.stdout.strip():
+        raise HTTPException(
+            status_code=422,
+            detail="no audio stream found in file"
+        )
+    
     result = subprocess.run([
         "ffmpeg", "-i", input_path,
         "-ar", "16000",
@@ -223,3 +245,69 @@ def _normalize_audio(input_path: str, output_path: str):
             status_code=500,
             detail=f"audio normalization error: {result.stderr.decode()}"
         )
+
+@app.post("/convert/email")
+async def convert_email(file: UploadFile = File(...)):
+    contents = await file.read()
+    source_ext = ext(file.filename or "")
+
+    if source_ext == "msg":
+        return _parse_msg(contents)
+    return _parse_eml(contents)
+
+def _parse_eml(data: bytes) -> dict:
+    msg = email_lib.message_from_bytes(data)
+    body = ""
+    attachments = []
+
+    for part in msg.walk():
+        content_type = part.get_content_type()
+        disposition = str(part.get("Content-Disposition", ""))
+        filename = part.get_filename()
+
+        if content_type == "text/plain" and "attachment" not in disposition:
+            payload = part.get_payload(decode=True)
+            if payload:
+                body += payload.decode("utf-8", errors="replace")
+        elif filename or "attachment" in disposition:
+            payload = part.get_payload(decode=True)
+            if payload:
+                attachments.append({
+                    "filename": filename or "attachment",
+                    "mime": content_type,
+                    "data": base64.b64encode(payload).decode()
+                })
+
+    return {
+        "subject": msg.get("Subject", ""),
+        "from":    msg.get("From", ""),
+        "to":      msg.get("To", ""),
+        "date":    msg.get("Date", ""),
+        "body":    body,
+        "attachments": attachments,
+    }
+
+def _parse_msg(data: bytes) -> dict:
+    with tempfile.NamedTemporaryFile(suffix=".msg", delete=False) as tmp:
+        tmp.write(data)
+        tmp_path = tmp.name
+    try:
+        msg = extract_msg.Message(tmp_path)
+        attachments = []
+        for att in msg.attachments:
+            if att.data:
+                attachments.append({
+                    "filename": att.longFilename or att.shortFilename or "attachment",
+                    "mime":     att.mimetype or "application/octet-stream",
+                    "data":     base64.b64encode(att.data).decode()
+                })
+        return {
+            "subject": msg.subject or "",
+            "from":    msg.sender or "",
+            "to":      msg.to or "",
+            "date":    str(msg.date) if msg.date else "",
+            "body":    msg.body or "",
+            "attachments": attachments,
+        }
+    finally:
+        os.unlink(tmp_path)

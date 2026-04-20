@@ -3,19 +3,19 @@ package main
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
-	"github.com/bjluckow/fsvector/internal/clients/convert"
-	"github.com/bjluckow/fsvector/internal/clients/embed"
-	"github.com/bjluckow/fsvector/internal/clients/transcribe"
-	"github.com/bjluckow/fsvector/internal/clients/vision"
+
+	"github.com/bjluckow/fsvector/internal/clients"
 	"github.com/bjluckow/fsvector/internal/config"
-	"github.com/bjluckow/fsvector/internal/daemon"
 	"github.com/bjluckow/fsvector/internal/pipeline"
+	"github.com/bjluckow/fsvector/internal/reindex"
+	"github.com/bjluckow/fsvector/internal/server"
 	"github.com/bjluckow/fsvector/internal/source"
 	"github.com/bjluckow/fsvector/internal/store"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -34,7 +34,9 @@ func main() {
 	fmt.Println("fsvectord starting")
 
 	// ── connect to services ───────────────────────────────────
-	embedClient := embed.NewClient(cfg.EmbedSvcURL)
+	httpClient := &http.Client{}
+
+	embedClient := clients.NewEmbedClient(cfg.EmbedSvcURL, httpClient)
 	health, err := embedClient.Health(ctx)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "fsvectord: embedsvc unreachable: %v\n", err)
@@ -42,7 +44,7 @@ func main() {
 	}
 	fmt.Printf("  embed model: %s (dim=%d)\n", health.Model, health.Dim)
 
-	convertClient := convert.NewClient(cfg.ConvertSvcURL)
+	convertClient := clients.NewConvertClient(cfg.ConvertSvcURL, httpClient)
 	convertHealth, err := convertClient.Health(ctx)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "fsvectord: convertsvc unreachable: %v\n", err)
@@ -50,7 +52,7 @@ func main() {
 	}
 	fmt.Printf("  convert backends: %v\n", convertHealth.Backends)
 
-	transcribeClient := transcribe.NewClient(cfg.TranscribeSvcURL)
+	transcribeClient := clients.NewTranscribeClient(cfg.TranscribeSvcURL, httpClient)
 	transcribeHealth, err := transcribeClient.Health(ctx)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "fsvectord: transcribesvc unreachable: %v\n", err)
@@ -58,7 +60,7 @@ func main() {
 	}
 	fmt.Printf("  transcribe model: %s\n", transcribeHealth.Model)
 
-	visionClient := vision.NewClient(cfg.VisionSvcURL)
+	visionClient := clients.NewVisionClient(cfg.VisionSvcURL, httpClient)
 	visionHealth, err := visionClient.Health(ctx)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "fsvectord: visionsvc unreachable: %v\n", err)
@@ -74,8 +76,14 @@ func main() {
 	}
 	defer pool.Close()
 
+	if err := store.Init(ctx, cfg.DatabaseURL); err != nil {
+		fmt.Fprintf(os.Stderr, "fsvectord: db: %v\n", err)
+		os.Exit(1)
+	}
+	defer store.Close()
+
 	// ── check for dimension mismatch ──────────────────────────────────────────
-	existingDim, err := store.EmbeddingDim(ctx, pool)
+	existingDim, err := store.GetEmbeddingDim(ctx)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "fsvectord: dim check: %v\n", err)
 		os.Exit(1)
@@ -89,13 +97,13 @@ func main() {
 	}
 
 	// ── migrate ───────────────────────────────────────────────────────────────
-	if err := store.Migrate(ctx, pool, health.Dim); err != nil {
+	if err := store.Migrate(ctx, health.Dim); err != nil {
 		fmt.Fprintf(os.Stderr, "fsvectord: migrate: %v\n", err)
 		os.Exit(1)
 	}
 	fmt.Println("  schema ok")
 
-	// ── load and reconcile data source─────────────────────────────────────────
+	// ── sources ───────────────────────────────────────────────────────────────
 
 	var src source.Source
 	switch cfg.SourceType {
@@ -112,21 +120,22 @@ func main() {
 			Bucket:             cfg.S3Bucket,
 			Prefix:             cfg.S3Prefix,
 			LargeFileThreshold: cfg.LargeFileThreshold,
+			PollInterval:       0,
 		})
-		fmt.Printf("  source       : %s\n", src.URI())
 	default:
-		src = source.NewLocalSource(cfg.WatchPath)
-		fmt.Printf("  source       : %s\n", cfg.WatchPath)
+		src = source.NewLocalSource(cfg.WatchPath, true, 0)
 	}
 
-	pCfg := pipeline.Config{
+	fmt.Printf("  source       : %s\n", src.URI())
+
+	// ── pipeline config ───────────────────────────────────────────────────────
+	pl := pipeline.Pipeline{
 		Reader:           src.Reader(),
 		EmbedClient:      embedClient,
 		ConvertClient:    convertClient,
 		TranscribeClient: transcribeClient,
 		VisionClient:     visionClient,
 		EmbedModel:       health.Model,
-		Source:           cfg.SourceType,
 		MinEmbedSize:     cfg.MinEmbedSize,
 		ChunkSize:        cfg.ChunkSize,
 		ChunkOverlap:     cfg.ChunkOverlap,
@@ -134,10 +143,14 @@ func main() {
 		VideoFrameRate:   cfg.VideoFrameRate,
 	}
 
-	// ── run ───────────────────────────────────────────────────────────────────
-	d := daemon.New(pool, src, pCfg, embedClient, cfg.DaemonPort)
-	if err := d.Run(ctx); err != nil {
-		fmt.Fprintf(os.Stderr, "fsvectord: %v\n", err)
-		os.Exit(1)
-	}
+	// ── progress + trigger (single for now, multi-source later) ──────────────
+	progress := &reindex.Progress{}
+	trigger := make(chan reindex.Trigger, 1)
+
+	// ── start HTTP server ─────────────────────────────────────────────────────
+	srv := server.New(embedClient, progress, trigger, src.URI())
+	go srv.Serve(ctx, cfg.DaemonPort)
+
+	// ── start reindex goroutine per source ───────────────────────────────────
+	reindex.IndexAndPoll(ctx, src, pl, progress, trigger)
 }

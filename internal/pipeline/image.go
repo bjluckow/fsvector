@@ -6,38 +6,35 @@ import (
 	"os"
 	"strings"
 
-	"github.com/bjluckow/fsvector/internal/chunk"
 	"github.com/bjluckow/fsvector/internal/source"
 	"github.com/bjluckow/fsvector/internal/store"
+	"github.com/bjluckow/fsvector/pkg/chunk"
 )
 
-func processImage(ctx context.Context, cfg Config, fi source.FileInfo) (Result, error) {
-	data, err := readFile(ctx, cfg, fi.Path)
-	if err != nil {
-		return Result{}, fmt.Errorf("read %s: %w", fi.Path, err)
-	}
+func (pl Pipeline) processImage(ctx context.Context, fi source.FileInfo, data []byte) (Result, error) {
+	var err error
 
 	// convert to JPEG if needed
 	if fi.Ext != "jpg" && fi.Ext != "jpeg" {
-		data, err = cfg.ConvertClient.ConvertToImage(ctx, fi.Name, data)
+		data, err = pl.ConvertClient.ConvertToImage(ctx, fi.Name, data)
 		if err != nil {
 			return Result{}, fmt.Errorf("convert %s: %w", fi.Path, err)
 		}
 	}
 
 	// CLIP embedding
-	vector, err := cfg.EmbedClient.EmbedImage(ctx, fi.Name, data)
+	vector, err := pl.EmbedClient.EmbedImage(ctx, fi.Name, data)
 	if err != nil {
 		return Result{}, fmt.Errorf("embed %s: %w", fi.Path, err)
 	}
 
 	// vision: caption + OCR
-	captionText := describeImage(ctx, cfg, fi, data)
-	ocrFiles := extractImageText(ctx, cfg, fi, data, 1)
+	captionText := pl.describeImage(ctx, fi, data)
+	ocrFiles := pl.extractImageText(ctx, fi, data, 1)
 
-	primaryRow := store.File{
+	primaryRow := store.UpsertFile{
 		Path:           fi.Path,
-		Source:         cfg.Source,
+		Source:         pl.Source,
 		ContentHash:    fi.Hash,
 		Size:           fi.Size,
 		MimeType:       fi.MimeType,
@@ -46,28 +43,27 @@ func processImage(ctx context.Context, cfg Config, fi source.FileInfo) (Result, 
 		FileExt:        fi.Ext,
 		FileCreatedAt:  &fi.CreatedAt,
 		FileModifiedAt: &fi.ModifiedAt,
-		EmbedModel:     cfg.EmbedModel,
+		EmbedModel:     pl.EmbedModel,
 		Embedding:      vector,
 		ChunkIndex:     0,
 		TextContent:    &captionText,
 	}
 
-	files := append([]store.File{primaryRow}, ocrFiles...)
+	files := append([]store.UpsertFile{primaryRow}, ocrFiles...)
 	return Result{Files: files}, nil
 }
 
 // describeImage returns a caption for the image.
 // Non-fatal — returns empty string on error.
-func describeImage(
+func (pl Pipeline) describeImage(
 	ctx context.Context,
-	cfg Config,
 	fi source.FileInfo,
 	imageData []byte,
 ) string {
-	if cfg.VisionClient == nil {
+	if pl.VisionClient == nil {
 		return ""
 	}
-	capResp, err := cfg.VisionClient.Caption(ctx, fi.Name, imageData)
+	capResp, err := pl.VisionClient.Caption(ctx, fi.Name, imageData)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "    caption %s: %v\n", fi.Path, err)
 		return ""
@@ -77,26 +73,25 @@ func describeImage(
 
 // extractImageText runs OCR and returns embedded text chunks.
 // Non-fatal — returns nil on error or no text found.
-func extractImageText(
+func (pl Pipeline) extractImageText(
 	ctx context.Context,
-	cfg Config,
 	fi source.FileInfo,
 	imageData []byte,
 	chunkOffset int,
-) []store.File {
-	if cfg.VisionClient == nil {
+) []store.UpsertFile {
+	if pl.VisionClient == nil {
 		return nil
 	}
-	ocrResp, err := cfg.VisionClient.OCR(ctx, fi.Name, imageData)
+	ocrResp, err := pl.VisionClient.OCR(ctx, fi.Name, imageData)
 	if err != nil || strings.TrimSpace(ocrResp.Text) == "" {
 		return nil
 	}
 
-	chunks := chunk.Split(ocrResp.Text, cfg.ChunkSize, cfg.ChunkOverlap, cfg.MinChunkSize)
+	chunks := chunk.Split(ocrResp.Text, pl.ChunkSize, pl.ChunkOverlap, pl.MinChunkSize)
 	ocrType := "ocr"
-	var files []store.File
+	var files []store.UpsertFile
 	for i, c := range chunks {
-		f, err := processTextChunk(ctx, cfg, fi, c, chunkOffset+i)
+		f, err := pl.processTextChunk(ctx, fi, c, chunkOffset+i)
 		if err != nil || f == nil {
 			continue
 		}

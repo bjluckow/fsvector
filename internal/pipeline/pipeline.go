@@ -4,21 +4,17 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/bjluckow/fsvector/internal/clients/convert"
-	"github.com/bjluckow/fsvector/internal/clients/embed"
-	"github.com/bjluckow/fsvector/internal/clients/transcribe"
-	"github.com/bjluckow/fsvector/internal/clients/vision"
+	"github.com/bjluckow/fsvector/internal/clients"
 	"github.com/bjluckow/fsvector/internal/source"
 	"github.com/bjluckow/fsvector/internal/store"
 )
 
-// Config holds the dependencies for the pipeline.
-type Config struct {
+type Pipeline struct {
 	Reader           source.FileReader
-	EmbedClient      *embed.Client
-	ConvertClient    *convert.Client
-	TranscribeClient *transcribe.Client
-	VisionClient     *vision.Client
+	EmbedClient      *clients.EmbedClient
+	ConvertClient    *clients.ConvertClient
+	TranscribeClient *clients.TranscribeClient
+	VisionClient     *clients.VisionClient
 	EmbedModel       string
 	Source           string
 	MinEmbedSize     int64
@@ -30,22 +26,27 @@ type Config struct {
 
 // Result is returned after a file has been processed.
 type Result struct {
-	Files      []store.File
+	Files      []store.UpsertFile
 	Skipped    bool
 	SkipReason string
 }
 
-func readFile(ctx context.Context, cfg Config, path string) ([]byte, error) {
-	return cfg.Reader.Read(ctx, path)
+// ReadAndProcessFile reads the file and processes it.
+func (pl *Pipeline) ReadAndProcessFile(ctx context.Context, fi source.FileInfo) (Result, error) {
+	data, err := pl.Reader.Read(ctx, fi.Path)
+	if err != nil {
+		return Result{}, fmt.Errorf("read %s: %w", fi.Path, err)
+	}
+	return pl.ProcessFileData(ctx, fi, data)
 }
 
-// Process runs a single FileInfo through the full pipeline:
-// detect modality → convert → embed → return store.File ready for upsert.
-func Process(ctx context.Context, cfg Config, fi source.FileInfo) (Result, error) {
-	if fi.Size < cfg.MinEmbedSize {
+// ProcessFileData processes a file with already-read bytes.
+// Used for email attachments where bytes are decoded from base64.
+func (pl *Pipeline) ProcessFileData(ctx context.Context, fi source.FileInfo, data []byte) (Result, error) {
+	if fi.Size < pl.MinEmbedSize {
 		return Result{
 			Skipped:    true,
-			SkipReason: fmt.Sprintf("file too small (< %d bytes)", cfg.MinEmbedSize),
+			SkipReason: fmt.Sprintf("file too small (< %d bytes)", pl.MinEmbedSize),
 		}, nil
 	}
 
@@ -59,13 +60,15 @@ func Process(ctx context.Context, cfg Config, fi source.FileInfo) (Result, error
 
 	switch modality {
 	case "text":
-		return processText(ctx, cfg, fi)
+		return pl.processText(ctx, fi, data)
 	case "image":
-		return processImage(ctx, cfg, fi)
+		return pl.processImage(ctx, fi, data)
 	case "audio":
-		return processAudio(ctx, cfg, fi)
+		return pl.processAudio(ctx, fi, data)
 	case "video":
-		return processVideo(ctx, cfg, fi)
+		return pl.processVideo(ctx, fi, data)
+	case "email":
+		return pl.processEmail(ctx, fi, data)
 	default:
 		return Result{
 			Skipped:    true,

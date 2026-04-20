@@ -16,6 +16,8 @@ var fileTypes = map[string]string{
 	"mp3": "audio", "m4a": "audio", "wav": "audio", "aac": "audio", "ogg": "audio",
 	// video
 	"mp4": "video", "mov": "video", "avi": "video", "mkv": "video",
+	// email
+	"eml": "email", "msg": "email",
 }
 
 func Modality(ext string) (string, bool) {

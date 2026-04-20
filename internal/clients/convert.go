@@ -1,0 +1,187 @@
+package clients
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"mime"
+	"mime/multipart"
+	"net/http"
+	"strconv"
+	"strings"
+)
+
+type ConvertClient struct {
+	BaseURL string
+	HTTP    *http.Client
+}
+
+func NewConvertClient(baseURL string, httpClient *http.Client) *ConvertClient {
+	return &ConvertClient{
+		BaseURL: baseURL,
+		HTTP:    httpClient,
+	}
+}
+
+type ConvertHealth struct {
+	Status   string   `json:"status"`
+	Backends []string `json:"backends"`
+}
+
+type VideoFrame struct {
+	Index       int
+	TimestampMs int64
+	Data        []byte
+}
+
+func (c *ConvertClient) Health(ctx context.Context) (*ConvertHealth, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.BaseURL+"/health", nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.HTTP.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("convertsvc health: %w", err)
+	}
+	defer resp.Body.Close()
+	var h ConvertHealth
+	if err := json.NewDecoder(resp.Body).Decode(&h); err != nil {
+		return nil, fmt.Errorf("convertsvc health decode: %w", err)
+	}
+	return &h, nil
+}
+
+// postFile is a helper for simple single-file-in/bytes-out requests.
+func (c *ConvertClient) postFile(ctx context.Context, path, filename string, data []byte, fields map[string]string) ([]byte, error) {
+	body, contentType, err := buildMultipart(filename, data, fields)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		c.BaseURL+path, bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", contentType)
+
+	resp, err := c.HTTP.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("convertsvc %s: %w", path, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("convertsvc %s: status %d: %s", path, resp.StatusCode, b)
+	}
+
+	return io.ReadAll(resp.Body)
+}
+
+func (c *ConvertClient) ConvertToText(ctx context.Context, filename string, data []byte) ([]byte, error) {
+	return c.postFile(ctx, "/convert/text", filename, data,
+		map[string]string{"target_format": "txt"})
+}
+
+func (c *ConvertClient) ConvertToImage(ctx context.Context, filename string, data []byte) ([]byte, error) {
+	return c.postFile(ctx, "/convert/image", filename, data,
+		map[string]string{"target_format": "jpg"})
+}
+
+func (c *ConvertClient) NormalizeAudio(ctx context.Context, filename string, data []byte) ([]byte, error) {
+	return c.postFile(ctx, "/convert/audio", filename, data, nil)
+}
+
+func (c *ConvertClient) ExtractVideoAudio(ctx context.Context, filename string, data []byte) ([]byte, error) {
+	return c.postFile(ctx, "/convert/video/audio", filename, data, nil)
+}
+
+func (c *ConvertClient) ExtractVideoFrames(ctx context.Context, filename string, data []byte, fps float64) ([]VideoFrame, error) {
+	body, contentType, err := buildMultipart(filename, data,
+		map[string]string{"fps": strconv.FormatFloat(fps, 'f', 2, 64)})
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		c.BaseURL+"/convert/video/frames", bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", contentType)
+
+	resp, err := c.HTTP.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("convertsvc extract frames: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("convertsvc extract frames: status %d: %s", resp.StatusCode, b)
+	}
+
+	// parse multipart response
+	mediaType, params, err := mime.ParseMediaType(resp.Header.Get("Content-Type"))
+	if err != nil || !strings.HasPrefix(mediaType, "multipart/") {
+		return nil, fmt.Errorf("convertsvc extract frames: unexpected content-type: %s", mediaType)
+	}
+
+	mr := multipart.NewReader(resp.Body, params["boundary"])
+	var frames []VideoFrame
+	for {
+		part, err := mr.NextPart()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, fmt.Errorf("convertsvc extract frames: read part: %w", err)
+		}
+
+		frameData, err := io.ReadAll(part)
+		if err != nil {
+			return nil, err
+		}
+
+		index, _ := strconv.Atoi(part.Header.Get("X-Frame-Index"))
+		tsMs, _ := strconv.ParseInt(part.Header.Get("X-Timestamp-Ms"), 10, 64)
+
+		frames = append(frames, VideoFrame{
+			Index:       index,
+			TimestampMs: tsMs,
+			Data:        frameData,
+		})
+	}
+
+	return frames, nil
+}
+
+type EmailAttachment struct {
+	Filename string `json:"filename"`
+	Mime     string `json:"mime"`
+	Data     string `json:"data"` // base64
+}
+
+type EmailResponse struct {
+	Subject     string            `json:"subject"`
+	From        string            `json:"from"`
+	To          string            `json:"to"`
+	Date        string            `json:"date"`
+	Body        string            `json:"body"`
+	Attachments []EmailAttachment `json:"attachments"`
+}
+
+func (c *ConvertClient) ParseEmail(ctx context.Context, filename string, data []byte) (*EmailResponse, error) {
+	result, err := c.postFile(ctx, "/convert/email", filename, data, nil)
+	if err != nil {
+		return nil, err
+	}
+	var r EmailResponse
+	if err := json.Unmarshal(result, &r); err != nil {
+		return nil, fmt.Errorf("parse email response: %w", err)
+	}
+	return &r, nil
+}

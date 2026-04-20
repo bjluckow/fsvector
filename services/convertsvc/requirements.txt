@@ -3,3 +3,4 @@ uvicorn
 python-magic
 python-multipart
 pillow
+extract-msg

@@ -5,18 +5,14 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/bjluckow/fsvector/internal/chunk"
 	"github.com/bjluckow/fsvector/internal/source"
 	"github.com/bjluckow/fsvector/internal/store"
+	"github.com/bjluckow/fsvector/pkg/chunk"
 )
 
-func processAudio(ctx context.Context, cfg Config, fi source.FileInfo) (Result, error) {
-	data, err := readFile(ctx, cfg, fi.Path)
-	if err != nil {
-		return Result{}, fmt.Errorf("read %s: %w", fi.Path, err)
-	}
+func (pl Pipeline) processAudio(ctx context.Context, fi source.FileInfo, data []byte) (Result, error) {
 
-	resp, err := cfg.TranscribeClient.Transcribe(ctx, fi.Name, data)
+	resp, err := pl.TranscribeClient.Transcribe(ctx, fi.Name, data)
 	if err != nil {
 		return Result{}, fmt.Errorf("transcribe %s: %w", fi.Path, err)
 	}
@@ -27,7 +23,7 @@ func processAudio(ctx context.Context, cfg Config, fi source.FileInfo) (Result, 
 		}, nil
 	}
 
-	chunks := chunk.Split(resp.Text, cfg.ChunkSize, cfg.ChunkOverlap, cfg.MinChunkSize)
+	chunks := chunk.Split(resp.Text, pl.ChunkSize, pl.ChunkOverlap, pl.MinChunkSize)
 	if len(chunks) == 0 {
 		return Result{
 			Skipped:    true,
@@ -41,9 +37,9 @@ func processAudio(ctx context.Context, cfg Config, fi source.FileInfo) (Result, 
 		"language":         resp.Language,
 	}
 
-	var files []store.File
+	var files []store.UpsertFile
 	for i, c := range chunks {
-		f, err := processTextChunk(ctx, cfg, fi, c, i)
+		f, err := pl.processTextChunk(ctx, fi, c, i)
 		if err != nil {
 			return Result{}, fmt.Errorf("chunk %d of %s: %w", i, fi.Path, err)
 		}

@@ -14,3 +14,5 @@ const (
 	ModalityVideo = "video"
 	ModalityEmail = "email"
 )
+
+const AttachmentSep = "::"
