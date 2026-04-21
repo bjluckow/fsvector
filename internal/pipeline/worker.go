@@ -1,0 +1,98 @@
+package pipeline
+
+import (
+	"context"
+	"fmt"
+	"time"
+)
+
+// BatchWorker accumulates WorkItems from its input channel and
+// flushes them as a batch when either the batch is full or the
+// flush timeout fires. This is the core pattern for all model
+// inference workers (embed, caption, text_embed) and the upsert worker.
+//
+// For non-batched operations (OCR, transcribe), use ParallelWorker instead.
+type BatchWorker struct {
+	Name         string
+	BatchSize    int
+	FlushTimeout time.Duration
+	Queue        <-chan *WorkItem
+	Process      func(ctx context.Context, batch []*WorkItem)
+}
+
+// Run starts the worker loop. It blocks until the input channel
+// is closed (and drained) or the context is canceled.
+func (w *BatchWorker) Run(ctx context.Context) {
+	var buf []*WorkItem
+	ticker := time.NewTicker(w.FlushTimeout)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case item, ok := <-w.Queue:
+			if !ok {
+				// channel closed — flush remaining items and exit
+				w.flush(ctx, buf)
+				return
+			}
+			buf = append(buf, item)
+			if len(buf) >= w.BatchSize {
+				w.flush(ctx, buf)
+				buf = nil
+			}
+
+		case <-ticker.C:
+			if len(buf) > 0 {
+				w.flush(ctx, buf)
+				buf = nil
+			}
+
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+
+func (w *BatchWorker) flush(ctx context.Context, batch []*WorkItem) {
+	if len(batch) == 0 {
+		return
+	}
+	start := time.Now()
+	w.Process(ctx, batch)
+	fmt.Printf("    %s: flushed %d items (%s)\n", w.Name, len(batch), time.Since(start).Round(time.Millisecond))
+}
+
+// ParallelWorker processes items one at a time but with bounded
+// concurrency. Used for operations that can't batch (OCR, transcribe)
+// but benefit from concurrent requests to the service.
+type ParallelWorker struct {
+	Name       string
+	MaxWorkers int
+	Queue      <-chan *WorkItem
+	Process    func(ctx context.Context, item *WorkItem)
+}
+
+// Run starts the worker loop with bounded concurrency.
+// It blocks until the input channel is closed and all in-flight
+// items are done, or the context is canceled.
+func (w *ParallelWorker) Run(ctx context.Context) {
+	sem := make(chan struct{}, w.MaxWorkers)
+
+	for item := range w.Queue {
+		select {
+		case <-ctx.Done():
+			return
+		case sem <- struct{}{}:
+		}
+
+		go func(it *WorkItem) {
+			defer func() { <-sem }()
+			w.Process(ctx, it)
+		}(item)
+	}
+
+	// drain: wait for all in-flight goroutines to finish
+	for i := 0; i < w.MaxWorkers; i++ {
+		sem <- struct{}{}
+	}
+}
