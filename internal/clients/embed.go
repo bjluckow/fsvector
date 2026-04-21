@@ -40,6 +40,10 @@ type imageEmbedResponse struct {
 	Embedding []float32 `json:"embedding"`
 }
 
+type imageBatchEmbedResponse struct {
+	Embeddings []*[]float32 `json:"embeddings"` // nullable per-item
+}
+
 func (c *EmbedClient) Health(ctx context.Context) (*EmbedHealth, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.BaseURL+"/health", nil)
 	if err != nil {
@@ -145,4 +149,35 @@ func (c *EmbedClient) EmbedImage(ctx context.Context, filename string, data []by
 		return nil, fmt.Errorf("embedsvc image decode: %w", err)
 	}
 	return r.Embedding, nil
+}
+
+// EmbedImageBatch sends multiple images to /embed/image/batch and returns
+// embeddings parallel to the input. Nil entries indicate per-image failures
+// on the service side.
+func (c *EmbedClient) EmbedImageBatch(ctx context.Context, images []FileInput) ([][]float32, error) {
+	body, contentType, err := buildMultipartBatch("files", images)
+	if err != nil {
+		return nil, fmt.Errorf("embedsvc image batch: build multipart: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		c.BaseURL+"/embed/image/batch", bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", contentType)
+
+	var r imageBatchEmbedResponse
+	if err := doJSON(c.HTTP, req, &r); err != nil {
+		return nil, fmt.Errorf("embedsvc image batch: %w", err)
+	}
+
+	// convert []*[]float32 → [][]float32 (nil stays nil)
+	out := make([][]float32, len(r.Embeddings))
+	for i, v := range r.Embeddings {
+		if v != nil {
+			out[i] = *v
+		}
+	}
+	return out, nil
 }

@@ -101,7 +101,16 @@ func Reindex(ctx context.Context, src source.Source, pl pipeline.Pipeline, progr
 		return err
 	}
 
-	return indexNew(ctx, pl, fsFiles, dbFiles, progress)
+	if err := indexNew(ctx, pl, fsFiles, dbFiles, progress); err != nil {
+		return err
+	}
+
+	snap := progress.Snapshot()
+	fmt.Printf("  reindex complete: %d indexed, %d skipped, %d deleted, %d errors (%s)\n",
+		snap.Indexed, snap.Skipped, snap.Deleted, len(snap.Errors),
+		time.Since(snap.StartedAt).Round(time.Second))
+
+	return nil
 }
 
 // modalityPriority returns processing order — lower is higher priority.
