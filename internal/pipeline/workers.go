@@ -112,6 +112,11 @@ func (p *Pipeline) newTranscribeWorker(r *router) *ParallelWorker {
 				return
 			}
 			if item.text != "" {
+				// store transcript metadata on the item row
+				if item.metadata != nil {
+					store.UpdateItemMetadata(ctx, item.itemID, item.metadata)
+				}
+
 				p.routeToUpsert(r, item, "transcript")
 
 				if p.cfg.EmbedTranscriptText {

@@ -1,6 +1,7 @@
 package pipeline
 
 import (
+	"encoding/json"
 	"sync/atomic"
 
 	"github.com/bjluckow/fsvector/internal/model"
@@ -54,6 +55,7 @@ type job struct {
 	text      string          // caption text, OCR text, transcript text, chunk text
 	embedding pgvector.Vector // populated by embed stages
 	newChunks []string        // populated by chunking (OCR/transcript text split into pieces)
+	metadata  json.RawMessage
 }
 
 // ForStage creates a shallow copy of the WorkItem with a different

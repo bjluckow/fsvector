@@ -2,48 +2,11 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"github.com/bjluckow/fsvector/internal/model"
 )
-
-// // FileRow represents a file to upsert into the files table.
-// type FileRow struct {
-// 	Path          string
-// 	Source        string
-// 	CanonicalPath *string
-// 	Modality      string
-// 	FileName      string
-// 	FileExt       string
-// 	MimeType      string
-// 	Size          int64
-// 	ContentHash   string
-// 	CreatedAt     time.Time
-// 	ModifiedAt    time.Time
-// 	Metadata      json.RawMessage // nil = SQL NULL
-// }
-
-// // ItemRow represents an item to upsert into the items table.
-// type ItemRow struct {
-// 	ItemType    string
-// 	ItemName    string
-// 	MimeType    string
-// 	Size        int64
-// 	ContentHash string
-// 	ItemIndex   int
-// 	Metadata    json.RawMessage
-// }
-
-// // ChunkRow represents a chunk to upsert into the chunks table.
-// type ChunkRow struct {
-// 	ItemID      int64
-// 	ChunkIndex  int
-// 	ChunkType   string
-// 	EmbedModel  string
-// 	Embedding   *pgvector.Vector
-// 	TextContent *string // nil = SQL NULL
-// 	Metadata    json.RawMessage
-// }
 
 // UpsertFile creates or updates a file row. Returns the file ID.
 // Called during phase 1 (extraction) before work items are dispatched.
@@ -100,6 +63,14 @@ func UpsertItem(ctx context.Context, fileID int64, item model.Item) (int64, erro
 		item.Size, item.ContentHash, item.ItemIndex, item.Metadata,
 	).Scan(&id)
 	return id, err
+}
+
+func UpdateItemMetadata(ctx context.Context, itemID int64, metadata json.RawMessage) error {
+	_, err := pool.Exec(ctx, `
+		UPDATE items SET metadata = $1 WHERE id = $2`,
+		metadata, itemID,
+	)
+	return err
 }
 
 // UpsertChunkBatch upserts multiple chunks in a single transaction.
