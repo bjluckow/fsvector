@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/bjluckow/fsvector/internal/fswalk"
+	"github.com/bjluckow/fsvector/internal/model"
 )
 
 // LocalSource wraps fsindex and watcher for local filesystem access.
@@ -24,7 +25,7 @@ func NewLocalSource(root string, watch bool, pollInterval time.Duration) *LocalS
 	}
 }
 
-func (s *LocalSource) Walk(ctx context.Context) ([]FileInfo, error) {
+func (s *LocalSource) Walk(ctx context.Context) ([]model.SourceFile, error) {
 	files, err := fswalk.Walk(s.Root)
 	if err != nil {
 		return nil, err
@@ -49,17 +50,17 @@ func (s *LocalSource) Watch(ctx context.Context, events chan<- Event) error {
 
 // FileInfoFromPath returns a source.FileInfo for a single local path.
 // Used by handleEvents for fsnotify file events.
-func FileInfoFromPath(path string) (FileInfo, error) {
+func FileInfoFromPath(path string) (model.SourceFile, error) {
 	fi, err := fswalk.FileInfoFromPath(path)
 	if err != nil {
-		return FileInfo{}, err
+		return model.SourceFile{}, err
 	}
 	return convertFileInfo(fi), nil
 }
 
 // convertFileInfo converts a single fsindex.FileInfo to source.FileInfo.
-func convertFileInfo(f fswalk.FileInfo) FileInfo {
-	return FileInfo{
+func convertFileInfo(f fswalk.FileInfo) model.SourceFile {
+	return model.SourceFile{
 		Path:       f.Path,
 		Name:       f.Name,
 		Ext:        strings.ToLower(f.Ext),
@@ -73,8 +74,8 @@ func convertFileInfo(f fswalk.FileInfo) FileInfo {
 }
 
 // convertFileInfos converts fsindex.FileInfo slice to source.FileInfo slice.
-func convertFileInfos(files []fswalk.FileInfo) []FileInfo {
-	result := make([]FileInfo, len(files))
+func convertFileInfos(files []fswalk.FileInfo) []model.SourceFile {
+	result := make([]model.SourceFile, len(files))
 	for i, f := range files {
 		result[i] = convertFileInfo(f)
 	}

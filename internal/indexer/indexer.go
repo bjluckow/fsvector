@@ -23,6 +23,7 @@ type Config struct {
 	MinChunkSize    int
 	VideoFrameRate  float64
 	DownloadWorkers int
+	PollInterval    time.Duration // 0 = no polling
 }
 
 type Indexer struct {
@@ -77,8 +78,8 @@ func (idx *Indexer) Run(ctx context.Context, trigger <-chan Trigger) error {
 	}
 
 	// poll loop
-	if idx.source.PollInterval() > 0 {
-		ticker := time.NewTicker(idx.source.PollInterval())
+	if idx.cfg.PollInterval > 0 {
+		ticker := time.NewTicker(idx.cfg.PollInterval)
 		defer ticker.Stop()
 		for {
 			select {

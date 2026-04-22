@@ -5,7 +5,6 @@ import (
 	"fmt"
 
 	"github.com/bjluckow/fsvector/internal/model"
-	"github.com/bjluckow/fsvector/internal/source"
 	"github.com/bjluckow/fsvector/internal/store"
 )
 
@@ -18,45 +17,45 @@ type DiffResult struct {
 
 // DiffFiles compares source files against the DB, identifies
 // files that need processing, handles dedup, and returns the diff.
-func DiffFiles(ctx context.Context, fsFiles []source.FileInfo, dbFiles map[string]string) DiffResult {
+func DiffFiles(ctx context.Context, fsFiles []model.SourceFile, dbFiles map[string]string) DiffResult {
 	var result DiffResult
 
-	for _, fi := range fsFiles {
-		existingHash, inDB := dbFiles[fi.Path]
-		if inDB && existingHash == fi.Hash {
-			store.UnDelete(ctx, fi.Path)
+	for _, sf := range fsFiles {
+		existingHash, inDB := dbFiles[sf.Path]
+		if inDB && existingHash == sf.Hash {
+			store.UnDelete(ctx, sf.Path)
 			result.Skipped++
 			continue
 		}
 
-		canonicalPath, isDupe, err := store.FindByHash(ctx, fi.Hash)
+		canonicalPath, isDupe, err := store.FindByHash(ctx, sf.Hash)
 		if err != nil {
-			result.Errors = append(result.Errors, fmt.Sprintf("hash check %s: %v", fi.Path, err))
+			result.Errors = append(result.Errors, fmt.Sprintf("hash check %s: %v", sf.Path, err))
 			continue
 		}
-		if isDupe && canonicalPath != fi.Path {
+		if isDupe && canonicalPath != sf.Path {
 			cp := canonicalPath
 			if _, err := store.UpsertFile(ctx, model.File{
-				Path:          fi.Path,
-				Source:        fi.SourceURI,
+				Path:          sf.Path,
+				Source:        sf.SourceURI,
 				CanonicalPath: &cp,
-				Modality:      string(modalityOrDefault(fi.Ext)),
-				Name:          fi.Name,
-				Ext:           fi.Ext,
-				MimeType:      fi.MimeType,
-				Size:          fi.Size,
-				ContentHash:   fi.Hash,
-				CreatedAt:     fi.CreatedAt,
-				ModifiedAt:    fi.ModifiedAt,
+				Modality:      string(modalityOrDefault(sf.Ext)),
+				Name:          sf.Name,
+				Ext:           sf.Ext,
+				MimeType:      sf.MimeType,
+				Size:          sf.Size,
+				ContentHash:   sf.Hash,
+				CreatedAt:     sf.CreatedAt,
+				ModifiedAt:    sf.ModifiedAt,
 			}); err != nil {
-				result.Errors = append(result.Errors, fmt.Sprintf("dupe %s: %v", fi.Path, err))
+				result.Errors = append(result.Errors, fmt.Sprintf("dupe %s: %v", sf.Path, err))
 			} else {
 				result.Dupes++
 			}
 			continue
 		}
 
-		result.ToProcess = append(result.ToProcess, fi.ToSourceFile())
+		result.ToProcess = append(result.ToProcess, sf)
 	}
 
 	return result

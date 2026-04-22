@@ -75,13 +75,13 @@ func (idx *Indexer) handleEvents(ctx context.Context, events <-chan source.Event
 				}
 
 			case source.EventCreate, source.EventUpdate:
-				fi, err := source.FileInfoFromPath(e.Path)
+				sf, err := source.FileInfoFromPath(e.Path)
 				if err != nil {
 					fmt.Fprintf(os.Stderr, "  stat %s: %v\n", e.Path, err)
 					continue
 				}
-				sf := fi.ToSourceFile()
-				items, err := idx.indexFile(ctx, sf, modalityOrDefault(fi.Ext))
+
+				items, err := idx.indexFile(ctx, sf, modalityOrDefault(sf.Ext))
 				if err != nil {
 					fmt.Fprintf(os.Stderr, "  index %s: %v\n", e.Path, err)
 					continue
@@ -107,15 +107,15 @@ func modalityOrDefault(ext string) model.Modality {
 	return m
 }
 
-func buildFSMap(files []source.FileInfo) map[string]source.FileInfo {
-	m := make(map[string]source.FileInfo, len(files))
+func buildFSMap(files []model.SourceFile) map[string]model.SourceFile {
+	m := make(map[string]model.SourceFile, len(files))
 	for _, f := range files {
 		m[f.Path] = f
 	}
 	return m
 }
 
-func deleteStale(ctx context.Context, sourceURI string, fsMap map[string]source.FileInfo, dbFiles map[string]string, progress *Progress) error {
+func deleteStale(ctx context.Context, sourceURI string, fsMap map[string]model.SourceFile, dbFiles map[string]string, progress *Progress) error {
 	for path := range dbFiles {
 		if _, exists := fsMap[path]; !exists {
 			if err := store.SoftDelete(ctx, path); err != nil {

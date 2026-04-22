@@ -2,44 +2,15 @@ package source
 
 import (
 	"context"
-	"time"
 
 	"github.com/bjluckow/fsvector/internal/model"
 )
 
-// FileInfo is source-agnostic file metadata.
-type FileInfo struct {
-	Path       string
-	Name       string
-	Ext        string
-	Size       int64
-	MimeType   string
-	Hash       string
-	ModifiedAt time.Time
-	CreatedAt  time.Time
-	SourceURI  string
-}
-
-func (fi FileInfo) ToSourceFile() model.SourceFile {
-	return model.SourceFile{
-		Path:       fi.Path,
-		Name:       fi.Name,
-		Ext:        fi.Ext,
-		Size:       fi.Size,
-		MimeType:   fi.MimeType,
-		Hash:       fi.Hash,
-		CreatedAt:  fi.CreatedAt,
-		ModifiedAt: fi.ModifiedAt,
-		SourceURI:  fi.SourceURI,
-	}
-}
-
 // Source abstracts a file collection — local filesystem, S3, email, etc.
 type Source interface {
-	Walk(ctx context.Context) ([]FileInfo, error)
+	Walk(ctx context.Context) ([]model.SourceFile, error)
 	Reader() FileReader
 	URI() string
-	PollInterval() time.Duration // 0 = no polling, explicit reindex only
 }
 
 // Watchable is optionally implemented by sources that support
