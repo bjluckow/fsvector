@@ -55,6 +55,12 @@ func DiffFiles(ctx context.Context, fsFiles []model.SourceFile, dbFiles map[stri
 			continue
 		}
 
+		_, supported := model.FileModality(sf.Ext)
+		if !supported {
+			result.Skipped++
+			continue
+		}
+
 		result.ToProcess = append(result.ToProcess, sf)
 	}
 

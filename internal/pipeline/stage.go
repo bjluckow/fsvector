@@ -26,13 +26,3 @@ var ModalityStages = map[model.Modality][]Stage{
 	model.ModalityVideo: {StageClipEmbed, StageCaption, StageTranscribe, StageTextEmbed, StageUpsert},
 	model.ModalityEmail: {StageTextEmbed, StageUpsert},
 }
-
-// ModalityOrder defines the processing order for extraction.
-// Text first (fast/lightweight), video last (heavy).
-var ModalityOrder = []model.Modality{
-	model.ModalityText,
-	model.ModalityImage,
-	model.ModalityAudio,
-	model.ModalityVideo,
-	model.ModalityEmail,
-}
