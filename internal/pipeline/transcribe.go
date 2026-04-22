@@ -11,11 +11,11 @@ import (
 // Like OCR, this runs via ParallelWorker — Whisper processes one
 // audio stream at a time, so concurrency comes from multiple
 // simultaneous requests, not batching.
-func Transcribe(ctx context.Context, client *clients.TranscribeClient, item *WorkItem) error {
-	resp, err := client.Transcribe(ctx, item.FileData.FileInfo.Name, item.FileData.Data)
+func Transcribe(ctx context.Context, client *clients.TranscribeClient, item *job) error {
+	resp, err := client.Transcribe(ctx, item.fileData.FilePath, item.fileData.Data)
 	if err != nil {
-		return fmt.Errorf("transcribe %s: %w", item.FileData.FileInfo.Path, err)
+		return fmt.Errorf("transcribe %s: %w", item.fileData.FilePath, err)
 	}
-	item.Text = resp.Text
+	item.text = resp.Text
 	return nil
 }

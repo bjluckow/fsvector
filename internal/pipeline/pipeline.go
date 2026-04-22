@@ -4,15 +4,13 @@ package pipeline
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
-	"sync/atomic"
+	"sync"
 	"time"
 
-	"github.com/sourcegraph/conc/pool"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/bjluckow/fsvector/internal/clients"
+	"github.com/bjluckow/fsvector/internal/model"
 	"github.com/bjluckow/fsvector/internal/source"
 )
 
@@ -87,13 +85,13 @@ type ProgressFunc func(path string, status string) // status: "indexed", "skippe
 
 // Pipeline orchestrates the two-phase index+process architecture.
 type Pipeline struct {
-	cfg        Config
-	extractors map[ModalityType]Extractor
-	enabled    map[Stage]bool
+	cfg     Config
+	input   <-chan model.Item
+	enabled map[Stage]bool
 }
 
 // New creates a Pipeline with extractors wired for each modality.
-func New(cfg Config) *Pipeline {
+func New(cfg Config, input <-chan model.Item) *Pipeline {
 	cfg.withDefaults()
 
 	enabled := map[Stage]bool{
@@ -107,174 +105,92 @@ func New(cfg Config) *Pipeline {
 
 	return &Pipeline{
 		cfg:     cfg,
+		input:   input,
 		enabled: enabled,
-		extractors: map[ModalityType]Extractor{
-			ModalityImage: &ImageExtractor{
-				Reader: cfg.Reader, Convert: cfg.ConvertClient,
-			},
-			ModalityText: &TextExtractor{
-				Reader: cfg.Reader, Convert: cfg.ConvertClient,
-				ChunkSize: cfg.ChunkSize, ChunkOverlap: cfg.ChunkOverlap,
-				MinChunkSize: cfg.MinChunkSize,
-			},
-			ModalityAudio: &AudioExtractor{
-				Reader: cfg.Reader, Convert: cfg.ConvertClient,
-			},
-			ModalityVideo: &VideoExtractor{
-				Reader: cfg.Reader, Convert: cfg.ConvertClient,
-				FrameRate: cfg.VideoFrameRate,
-			},
-			ModalityEmail: &EmailExtractor{
-				Reader: cfg.Reader, Convert: cfg.ConvertClient,
-				ChunkSize: cfg.ChunkSize, ChunkOverlap: cfg.ChunkOverlap,
-				MinChunkSize: cfg.MinChunkSize,
-			},
-		},
 	}
 }
 
-// RunBatch processes files through both phases:
-// Phase 1 (index): extract, convert, create DB rows, enqueue work items.
-// Phase 2 (process): workers consume queues, call services, write chunks.
-func (p *Pipeline) RunBatch(ctx context.Context, files []source.FileInfo, onProgress ProgressFunc) error {
+// Start begins processing items from the input channel.
+// Blocks until the input channel is closed and all workers drain.
+// Call from a goroutine.
+func (p *Pipeline) Start(ctx context.Context) error {
 	r := newRouter(ctx,
-		map[Stage]chan *WorkItem{
-			StageClipEmbed:  make(chan *WorkItem, p.cfg.EmbedBatchSize*2),
-			StageCaption:    make(chan *WorkItem, p.cfg.CaptionBatchSize*2),
-			StageOCR:        make(chan *WorkItem, p.cfg.OCRWorkers*2),
-			StageTranscribe: make(chan *WorkItem, p.cfg.TranscribeWorkers*2),
-			StageTextEmbed:  make(chan *WorkItem, p.cfg.TextEmbedBatchSize*2),
-			StageUpsert:     make(chan *WorkItem, p.cfg.UpsertBatchSize*2),
+		map[Stage]chan *job{
+			StageClipEmbed:  make(chan *job, p.cfg.EmbedBatchSize*2),
+			StageCaption:    make(chan *job, p.cfg.CaptionBatchSize*2),
+			StageOCR:        make(chan *job, p.cfg.OCRWorkers*2),
+			StageTranscribe: make(chan *job, p.cfg.TranscribeWorkers*2),
+			StageTextEmbed:  make(chan *job, p.cfg.TextEmbedBatchSize*2),
+			StageUpsert:     make(chan *job, p.cfg.UpsertBatchSize*2),
 		},
 		p.enabled,
 	)
 
-	// --- Start workers in tiers (phase 2) ---
+	var tier1Done sync.WaitGroup
+	tier1Done.Add(4)
 
-	// Tier 1: primary workers (consume from extraction)
-	tier1, t1ctx := errgroup.WithContext(ctx)
-	tier1.Go(func() error { p.newClipEmbedWorker(r).Run(t1ctx); return nil })
-	tier1.Go(func() error { p.newCaptionWorker(r).Run(t1ctx); return nil })
-	tier1.Go(func() error { p.newOCRWorker(r).Run(t1ctx); return nil })
-	tier1.Go(func() error { p.newTranscribeWorker(r).Run(t1ctx); return nil })
+	var tier2Done sync.WaitGroup
+	tier2Done.Add(1)
 
-	// Tier 2: text embed (consumes from tier 1 outputs)
-	tier2, t2ctx := errgroup.WithContext(ctx)
-	tier2.Go(func() error { p.newTextEmbedWorker(r).Run(t2ctx); return nil })
+	g, ctx := errgroup.WithContext(ctx)
 
-	// Tier 3: upsert (consumes from all tiers)
-	tier3, t3ctx := errgroup.WithContext(ctx)
-	tier3.Go(func() error { p.newUpsertWorker(r).Run(t3ctx); return nil })
+	// Tier 1
+	g.Go(func() error { p.newClipEmbedWorker(r).Run(ctx); tier1Done.Done(); return nil })
+	g.Go(func() error { p.newCaptionWorker(r).Run(ctx); tier1Done.Done(); return nil })
+	g.Go(func() error { p.newOCRWorker(r).Run(ctx); tier1Done.Done(); return nil })
+	g.Go(func() error { p.newTranscribeWorker(r).Run(ctx); tier1Done.Done(); return nil })
 
-	// --- Phase 1: extraction ---
+	// Cascade: close text_embed when tier 1 done
+	g.Go(func() error { tier1Done.Wait(); r.closeCh(StageTextEmbed); return nil })
 
-	groups := groupByModality(files)
-	var extracted atomic.Int32
-	total := len(files)
+	// Tier 2
+	g.Go(func() error { p.newTextEmbedWorker(r).Run(ctx); tier2Done.Done(); return nil })
 
-	for _, mod := range ModalityOrder {
-		group := groups[mod]
-		if len(group) == 0 {
-			continue
+	// Cascade: close upsert when tier 1 and tier 2 done
+	g.Go(func() error { tier1Done.Wait(); tier2Done.Wait(); r.closeCh(StageUpsert); return nil })
+
+	// Tier 3
+	g.Go(func() error { p.newUpsertWorker(r).Run(ctx); return nil })
+
+	// Read from input channel, create jobs, route
+	for item := range p.input {
+		fd := newFileData(item.FilePath, item.Data, 0)
+		jobs := jobsForItem(item, fd, p.enabled)
+		fd.pending.Store(int32(len(jobs)))
+		for _, j := range jobs {
+			r.route(j)
 		}
-
-		extractor := p.extractors[mod]
-		if extractor == nil {
-			continue
-		}
-
-		fmt.Printf("  extracting %d %s files...\n", len(group), mod)
-
-		ep := pool.New().WithMaxGoroutines(p.cfg.DownloadWorkers)
-		for _, fi := range group {
-			fi := fi
-			ep.Go(func() {
-				items, err := extractor.Extract(ctx, fi)
-				n := extracted.Add(1)
-
-				if err != nil {
-					fmt.Printf("    extract %s: %v\n", fi.Path, err)
-					if onProgress != nil {
-						onProgress(fi.Path, "error")
-					}
-				} else if len(items) == 0 {
-					if onProgress != nil {
-						onProgress(fi.Path, "skipped")
-					}
-				} else {
-					r.routeMany(items)
-					if onProgress != nil {
-						onProgress(fi.Path, "indexed")
-					}
-				}
-
-				if n%100 == 0 || int(n) == total {
-					fmt.Printf("  [%d/%d] extraction progress\n", n, total)
-				}
-			})
-		}
-		ep.Wait()
-
 	}
 
-	// --- Cascade close ---
-
-	// Tier 1 inputs done
+	// Input closed — close tier 1 inputs
 	r.closeCh(StageClipEmbed)
 	r.closeCh(StageCaption)
 	r.closeCh(StageOCR)
 	r.closeCh(StageTranscribe)
-	if err := tier1.Wait(); err != nil {
-		return fmt.Errorf("tier1: %w", err)
-	}
 
-	// Tier 1 finished — no more text_embed items will be produced
-	r.closeCh(StageTextEmbed)
-	if err := tier2.Wait(); err != nil {
-		return fmt.Errorf("tier2: %w", err)
-	}
-
-	// Tier 2 finished — no more upsert items will be produced
-	r.closeCh(StageUpsert)
-	if err := tier3.Wait(); err != nil {
-		return fmt.Errorf("tier3: %w", err)
-	}
-
-	return nil
+	return g.Wait()
 }
 
 // routeToUpsert creates an upsert-stage WorkItem and routes it.
-func (p *Pipeline) routeToUpsert(r *router, item *WorkItem, chunkType string) {
-	item.FileData.AddRef()
-	r.route(&WorkItem{
-		FileData:  item.FileData,
-		Modality:  item.Modality,
-		Stage:     StageUpsert,
-		ItemType:  chunkType,
-		ItemID:    item.ItemID,
-		ItemIndex: item.ItemIndex,
-		Text:      item.Text,
-		Embedding: item.Embedding,
+func (p *Pipeline) routeToUpsert(r *router, item *job, chunkType string) {
+	item.fileData.addRef()
+	r.route(&job{
+		fileData:  item.fileData,
+		modality:  item.modality,
+		stage:     StageUpsert,
+		itemType:  chunkType,
+		itemID:    item.itemID,
+		itemIndex: item.itemIndex,
+		text:      item.text,
+		embedding: item.embedding,
 	})
 }
 
 // releaseBatch releases FileData refs for all items in a batch.
-func (p *Pipeline) releaseBatch(batch []*WorkItem) {
+func (p *Pipeline) releaseBatch(batch []*job) {
 	for _, item := range batch {
-		item.FileData.Release()
+		item.fileData.release()
 	}
-}
-
-func groupByModality(files []source.FileInfo) map[ModalityType][]source.FileInfo {
-	groups := make(map[ModalityType][]source.FileInfo)
-	for _, f := range files {
-		mod, ok := Modality(f.Ext)
-		if !ok {
-			continue
-		}
-		groups[ModalityType(mod)] = append(groups[ModalityType(mod)], f)
-	}
-	return groups
 }
 
 func strPtr(s string) *string {
@@ -282,12 +198,4 @@ func strPtr(s string) *string {
 		return nil
 	}
 	return &s
-}
-
-func mustJSON(v any) json.RawMessage {
-	b, err := json.Marshal(v)
-	if err != nil {
-		return nil
-	}
-	return b
 }

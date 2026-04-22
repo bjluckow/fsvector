@@ -9,39 +9,39 @@ import (
 // enabled stages. Single point of control for feature flags.
 type router struct {
 	ctx     context.Context
-	queues  map[Stage]chan *WorkItem
+	queues  map[Stage]chan *job
 	enabled map[Stage]bool
 }
 
-func newRouter(ctx context.Context, queues map[Stage]chan *WorkItem, enabled map[Stage]bool) *router {
+func newRouter(ctx context.Context, queues map[Stage]chan *job, enabled map[Stage]bool) *router {
 	return &router{ctx: ctx, queues: queues, enabled: enabled}
 }
 
-func (r *router) route(item *WorkItem) {
-	if !r.enabled[item.Stage] {
-		item.FileData.Release()
+func (r *router) route(item *job) {
+	if !r.enabled[item.stage] {
+		item.fileData.release()
 		return
 	}
-	q, ok := r.queues[item.Stage]
+	q, ok := r.queues[item.stage]
 	if !ok {
-		fmt.Printf("    router: no queue for stage %s, dropping\n", item.Stage)
-		item.FileData.Release()
+		fmt.Printf("    router: no queue for stage %s, dropping\n", item.stage)
+		item.fileData.release()
 		return
 	}
 	select {
 	case q <- item:
 	case <-r.ctx.Done():
-		item.FileData.Release()
+		item.fileData.release()
 	}
 }
 
-func (r *router) routeMany(items []*WorkItem) {
+func (r *router) routeMany(items []*job) {
 	for _, item := range items {
 		r.route(item)
 	}
 }
 
-func (r *router) ch(stage Stage) <-chan *WorkItem {
+func (r *router) ch(stage Stage) <-chan *job {
 	return r.queues[stage]
 }
 

@@ -10,11 +10,13 @@ import (
 
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/bjluckow/fsvector/internal/clients"
 	"github.com/bjluckow/fsvector/internal/config"
+	"github.com/bjluckow/fsvector/internal/indexer"
+	"github.com/bjluckow/fsvector/internal/model"
 	"github.com/bjluckow/fsvector/internal/pipeline"
-	"github.com/bjluckow/fsvector/internal/reindex"
 	"github.com/bjluckow/fsvector/internal/server"
 	"github.com/bjluckow/fsvector/internal/source"
 	"github.com/bjluckow/fsvector/internal/store"
@@ -128,43 +130,48 @@ func main() {
 
 	fmt.Printf("  source       : %s\n", src.URI())
 
+	// ── work channel ─────────────────────────────────────────────────────────
+	work := make(chan model.Item, 256)
+
+	// ── indexer config ────────────────────────────────────────────────────────
+	progress := &indexer.Progress{}
+	trigger := make(chan indexer.Trigger, 1)
+
+	idx := indexer.New(indexer.Config{
+		ConvertClient:   convertClient,
+		ChunkSize:       cfg.ChunkSize,
+		ChunkOverlap:    cfg.ChunkOverlap,
+		MinChunkSize:    cfg.MinChunkSize,
+		VideoFrameRate:  cfg.VideoFrameRate,
+		DownloadWorkers: 8,
+	}, src, work, progress)
+
 	// ── pipeline config ───────────────────────────────────────────────────────
 	pl := pipeline.New(pipeline.Config{
-		Reader:           src.Reader(),
-		EmbedClient:      embedClient,
-		ConvertClient:    convertClient,
-		TranscribeClient: transcribeClient,
-		VisionClient:     visionClient,
-		EmbedModel:       health.Model,
-		ChunkSize:        cfg.ChunkSize,
-		ChunkOverlap:     cfg.ChunkOverlap,
-		MinChunkSize:     cfg.MinChunkSize,
-		VideoFrameRate:   cfg.VideoFrameRate,
-		EnableCaption:    cfg.EnableCaption,
-		EnableOCR:        cfg.EnableOCR,
-		EnableTranscribe: cfg.EnableTranscribe,
-
-		// batch/concurrency (use defaults or pull from config)
-		// EmbedBatchSize:     32,
-		// CaptionBatchSize:   4,
-		// DownloadWorkers:    8,
-		// OCRWorkers:         4,
-		// TranscribeWorkers:  2,
-
-		// feature flags
+		EmbedClient:         embedClient,
+		VisionClient:        visionClient,
+		TranscribeClient:    transcribeClient,
+		EmbedModel:          health.Model,
+		EnableCaption:       cfg.EnableCaption,
+		EnableOCR:           cfg.EnableOCR,
+		EnableTranscribe:    cfg.EnableTranscribe,
 		EmbedOCRText:        true,
 		EmbedTranscriptText: true,
 		EmbedCaptionText:    false,
-	})
-
-	// ── progress + trigger (single for now, multi-source later) ──────────────
-	progress := &reindex.Progress{}
-	trigger := make(chan reindex.Trigger, 1)
+	}, work)
 
 	// ── start HTTP server ─────────────────────────────────────────────────────
 	srv := server.New(embedClient, progress, trigger, src.URI())
 	go srv.Serve(ctx, cfg.DaemonPort)
 
-	// ── start reindex goroutine per source ───────────────────────────────────
-	reindex.IndexAndPoll(ctx, src, pl, progress, trigger)
+	// ── start indexer + pipeline ──────────────────────────────────────────────
+	g, ctx := errgroup.WithContext(ctx)
+	g.Go(func() error {
+		defer idx.Close()
+		return idx.Run(ctx, trigger)
+	})
+	g.Go(func() error {
+		return pl.Start(ctx)
+	})
+	g.Wait()
 }

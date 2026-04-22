@@ -1,15 +1,6 @@
 package pipeline
 
-// Modality represents the type of content a file contains.
-type ModalityType string
-
-const (
-	ModalityImage ModalityType = "image"
-	ModalityText  ModalityType = "text"
-	ModalityAudio ModalityType = "audio"
-	ModalityVideo ModalityType = "video"
-	ModalityEmail ModalityType = "email"
-)
+import "github.com/bjluckow/fsvector/internal/model"
 
 // Stage represents a discrete processing operation in the pipeline.
 type Stage string
@@ -28,20 +19,20 @@ const (
 // ModalityStages defines which processing stages apply to each modality.
 // Download and convert are handled in extraction (phase 1), so these
 // list only the phase 2 worker stages.
-var ModalityStages = map[ModalityType][]Stage{
-	ModalityImage: {StageClipEmbed, StageCaption, StageOCR, StageTextEmbed, StageUpsert},
-	ModalityText:  {StageTextEmbed, StageUpsert},
-	ModalityAudio: {StageTranscribe, StageTextEmbed, StageUpsert},
-	ModalityVideo: {StageClipEmbed, StageCaption, StageTranscribe, StageTextEmbed, StageUpsert},
-	ModalityEmail: {StageTextEmbed, StageUpsert},
+var ModalityStages = map[model.Modality][]Stage{
+	model.ModalityImage: {StageClipEmbed, StageCaption, StageOCR, StageTextEmbed, StageUpsert},
+	model.ModalityText:  {StageTextEmbed, StageUpsert},
+	model.ModalityAudio: {StageTranscribe, StageTextEmbed, StageUpsert},
+	model.ModalityVideo: {StageClipEmbed, StageCaption, StageTranscribe, StageTextEmbed, StageUpsert},
+	model.ModalityEmail: {StageTextEmbed, StageUpsert},
 }
 
 // ModalityOrder defines the processing order for extraction.
 // Text first (fast/lightweight), video last (heavy).
-var ModalityOrder = []ModalityType{
-	ModalityText,
-	ModalityImage,
-	ModalityAudio,
-	ModalityVideo,
-	ModalityEmail,
+var ModalityOrder = []model.Modality{
+	model.ModalityText,
+	model.ModalityImage,
+	model.ModalityAudio,
+	model.ModalityVideo,
+	model.ModalityEmail,
 }

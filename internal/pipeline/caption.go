@@ -9,12 +9,12 @@ import (
 
 // BatchCaption calls visionsvc /caption/batch for a batch of WorkItems.
 // Writes the resulting caption strings back onto each item's Text field.
-func BatchCaption(ctx context.Context, client *clients.VisionClient, batch []*WorkItem) error {
+func BatchCaption(ctx context.Context, client *clients.VisionClient, batch []*job) error {
 	inputs := make([]clients.FileInput, len(batch))
 	for i, item := range batch {
 		inputs[i] = clients.FileInput{
-			Filename: item.FileData.FileInfo.Name,
-			Data:     item.FileData.Data,
+			Filename: item.fileData.FilePath,
+			Data:     item.fileData.Data,
 		}
 	}
 
@@ -25,9 +25,9 @@ func BatchCaption(ctx context.Context, client *clients.VisionClient, batch []*Wo
 
 	for i, item := range batch {
 		if captions[i] == "" {
-			fmt.Printf("      caption: empty result for %s\n", item.FileData.FileInfo.Path)
+			fmt.Printf("      caption: empty result for %s\n", item.fileData.FilePath)
 		}
-		item.Text = captions[i]
+		item.text = captions[i]
 	}
 	return nil
 }

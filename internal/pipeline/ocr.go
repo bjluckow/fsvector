@@ -10,11 +10,11 @@ import (
 // OCR calls visionsvc /ocr for a single WorkItem. This is called
 // concurrently by the ParallelWorker, not batched, because tesseract
 // is already fast per-image.
-func OCR(ctx context.Context, client *clients.VisionClient, item *WorkItem) error {
-	resp, err := client.OCR(ctx, item.FileData.FileInfo.Name, item.FileData.Data)
+func OCR(ctx context.Context, client *clients.VisionClient, item *job) error {
+	resp, err := client.OCR(ctx, item.fileData.FilePath, item.fileData.Data)
 	if err != nil {
-		return fmt.Errorf("ocr %s: %w", item.FileData.FileInfo.Path, err)
+		return fmt.Errorf("ocr %s: %w", item.fileData.FilePath, err)
 	}
-	item.Text = resp.Text
+	item.text = resp.Text
 	return nil
 }

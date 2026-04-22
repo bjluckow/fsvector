@@ -12,12 +12,12 @@ import (
 // WorkItems that need CLIP embeddings. Writes the resulting vectors
 // back onto each item's Embedding field. Items whose embeddings
 // come back nil (per-image failure) are logged and skipped.
-func BatchClipEmbed(ctx context.Context, client *clients.EmbedClient, model string, batch []*WorkItem) error {
+func BatchClipEmbed(ctx context.Context, client *clients.EmbedClient, model string, batch []*job) error {
 	inputs := make([]clients.FileInput, len(batch))
 	for i, item := range batch {
 		inputs[i] = clients.FileInput{
-			Filename: item.FileData.FileInfo.Name,
-			Data:     item.FileData.Data,
+			Filename: item.fileData.FilePath,
+			Data:     item.fileData.Data,
 		}
 	}
 
@@ -28,10 +28,10 @@ func BatchClipEmbed(ctx context.Context, client *clients.EmbedClient, model stri
 
 	for i, item := range batch {
 		if vectors[i] == nil {
-			fmt.Printf("      clip embed: nil result for %s\n", item.FileData.FileInfo.Path)
+			fmt.Printf("      clip embed: nil result for %s\n", item.fileData.FilePath)
 			continue
 		}
-		item.Embedding = pgvector.NewVector(vectors[i])
+		item.embedding = pgvector.NewVector(vectors[i])
 	}
 	return nil
 }
@@ -39,10 +39,10 @@ func BatchClipEmbed(ctx context.Context, client *clients.EmbedClient, model stri
 // BatchTextEmbed calls embedsvc /embed/text for a batch of WorkItems
 // that have text content needing embedding. Reads from item.Text,
 // writes to item.Embedding.
-func BatchTextEmbed(ctx context.Context, client *clients.EmbedClient, model string, batch []*WorkItem) error {
+func BatchTextEmbed(ctx context.Context, client *clients.EmbedClient, model string, batch []*job) error {
 	texts := make([]string, len(batch))
 	for i, item := range batch {
-		texts[i] = item.Text
+		texts[i] = item.text
 	}
 
 	vectors, err := client.EmbedTexts(ctx, texts)
@@ -51,7 +51,7 @@ func BatchTextEmbed(ctx context.Context, client *clients.EmbedClient, model stri
 	}
 
 	for i, item := range batch {
-		item.Embedding = pgvector.NewVector(vectors[i])
+		item.embedding = pgvector.NewVector(vectors[i])
 	}
 	return nil
 }

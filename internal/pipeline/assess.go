@@ -1,6 +1,9 @@
 package pipeline
 
-import "github.com/bjluckow/fsvector/internal/store"
+import (
+	"github.com/bjluckow/fsvector/internal/model"
+	"github.com/bjluckow/fsvector/internal/store"
+)
 
 // AssessNeededStages determines which processing stages still need
 // to run for a file, given its modality and existing DB artifacts.
@@ -10,7 +13,7 @@ import "github.com/bjluckow/fsvector/internal/store"
 //
 // If the file is unchanged, only stages whose artifacts are missing
 // are returned.
-func AssessNeededStages(modality ModalityType, status *store.FileStatus, currentHash string) []Stage {
+func AssessNeededStages(modality model.Modality, status *store.FileStatus, currentHash string) []Stage {
 	all := ModalityStages[modality]
 
 	// new file or content changed — need everything
@@ -30,7 +33,7 @@ func AssessNeededStages(modality ModalityType, status *store.FileStatus, current
 // stageComplete checks whether a stage's artifacts already exist
 // in the DB. This is the Option A approach: infer completion from
 // the items and chunks that are present.
-func stageComplete(s Stage, modality ModalityType, status *store.FileStatus) bool {
+func stageComplete(s Stage, modality model.Modality, status *store.FileStatus) bool {
 	switch s {
 	case StageClipEmbed:
 		return status.HasChunks["image:embed"] || status.HasChunks["frame:embed"]
@@ -47,13 +50,13 @@ func stageComplete(s Stage, modality ModalityType, status *store.FileStatus) boo
 		// OCR, transcribe) are all done, we assume text embed is too.
 		// A re-run will no-op via the chunk upsert's ON CONFLICT.
 		switch modality {
-		case ModalityText:
+		case model.ModalityText:
 			return status.HasChunks["text:embed"]
-		case ModalityImage:
+		case model.ModalityImage:
 			return status.HasChunks["ocr:embed"] || !status.HasItems["ocr"]
-		case ModalityAudio:
+		case model.ModalityAudio:
 			return status.HasChunks["transcript:embed"] || !status.HasItems["transcript"]
-		case ModalityVideo:
+		case model.ModalityVideo:
 			ocrDone := status.HasChunks["ocr:embed"] || !status.HasItems["ocr"]
 			txnDone := status.HasChunks["transcript:embed"] || !status.HasItems["transcript"]
 			return ocrDone && txnDone

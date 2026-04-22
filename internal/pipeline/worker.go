@@ -17,14 +17,14 @@ type BatchWorker struct {
 	Name         string
 	BatchSize    int
 	FlushTimeout time.Duration
-	Queue        <-chan *WorkItem
-	Process      func(ctx context.Context, batch []*WorkItem)
+	Queue        <-chan *job
+	Process      func(ctx context.Context, batch []*job)
 }
 
 // Run starts the worker loop. It blocks until the input channel
 // is closed (and drained) or the context is canceled.
 func (w *BatchWorker) Run(ctx context.Context) {
-	var buf []*WorkItem
+	var buf []*job
 	ticker := time.NewTicker(w.FlushTimeout)
 	defer ticker.Stop()
 
@@ -48,14 +48,14 @@ func (w *BatchWorker) Run(ctx context.Context) {
 		case <-ctx.Done():
 			// release any buffered items
 			for _, item := range buf {
-				item.FileData.Release()
+				item.fileData.release()
 			}
 			return
 		}
 	}
 }
 
-func (w *BatchWorker) flush(ctx context.Context, batch []*WorkItem) {
+func (w *BatchWorker) flush(ctx context.Context, batch []*job) {
 	if len(batch) == 0 {
 		return
 	}
@@ -70,8 +70,8 @@ func (w *BatchWorker) flush(ctx context.Context, batch []*WorkItem) {
 type ParallelWorker struct {
 	Name       string
 	MaxWorkers int
-	Queue      <-chan *WorkItem
-	Process    func(ctx context.Context, item *WorkItem)
+	Queue      <-chan *job
+	Process    func(ctx context.Context, item *job)
 }
 
 // Run starts the worker loop with bounded concurrency.
@@ -90,7 +90,7 @@ func (w *ParallelWorker) Run(ctx context.Context) {
 			}
 			sem <- struct{}{}
 			wg.Add(1)
-			go func(it *WorkItem) {
+			go func(it *job) {
 				defer func() {
 					<-sem
 					wg.Done()

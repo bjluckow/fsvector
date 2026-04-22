@@ -28,6 +28,27 @@ func GetEmbeddingDim(ctx context.Context) (int, error) {
 	return dim, nil
 }
 
+// AllPaths returns path → content_hash for ALL files from a source,
+// including soft-deleted ones.
+func AllPaths(ctx context.Context) (map[string]string, error) {
+	rows, err := pool.Query(ctx, `
+		SELECT path, content_hash FROM files`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	m := make(map[string]string)
+	for rows.Next() {
+		var path, hash string
+		if err := rows.Scan(&path, &hash); err != nil {
+			return nil, err
+		}
+		m[path] = hash
+	}
+	return m, rows.Err()
+}
+
 // LivePaths returns path → content_hash for all live canonical files.
 // Used during reconciliation to diff against the source.
 func LivePaths(ctx context.Context) (map[string]string, error) {

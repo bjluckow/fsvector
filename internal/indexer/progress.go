@@ -1,4 +1,4 @@
-package reindex
+package indexer
 
 import (
 	"sync"
@@ -7,8 +7,6 @@ import (
 	"github.com/bjluckow/fsvector/pkg/api"
 )
 
-// Progress tracks the state of a reindex run.
-// Exported so server can read it.
 type Progress struct {
 	mu         sync.RWMutex
 	Running    bool
@@ -36,6 +34,12 @@ func (p *Progress) Snapshot() api.ProgressSnapshot {
 	}
 }
 
+func (p *Progress) IsRunning() bool {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.Running
+}
+
 func (p *Progress) start() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -54,10 +58,12 @@ func (p *Progress) finish() {
 	p.FinishedAt = &now
 }
 
-func (p *Progress) setTotal(n int) { p.mu.Lock(); p.Total = n; p.mu.Unlock() }
-func (p *Progress) incIndexed()    { p.mu.Lock(); p.Indexed++; p.mu.Unlock() }
-func (p *Progress) incDeleted()    { p.mu.Lock(); p.Deleted++; p.mu.Unlock() }
-func (p *Progress) incSkipped()    { p.mu.Lock(); p.Skipped++; p.mu.Unlock() }
+func (p *Progress) setTotal(n int)   { p.mu.Lock(); p.Total = n; p.mu.Unlock() }
+func (p *Progress) incIndexed()      { p.mu.Lock(); p.Indexed++; p.mu.Unlock() }
+func (p *Progress) addIndexed(n int) { p.mu.Lock(); p.Indexed += n; p.mu.Unlock() }
+func (p *Progress) incDeleted()      { p.mu.Lock(); p.Deleted++; p.mu.Unlock() }
+func (p *Progress) incSkipped()      { p.mu.Lock(); p.Skipped++; p.mu.Unlock() }
+func (p *Progress) addSkipped(n int) { p.mu.Lock(); p.Skipped += n; p.mu.Unlock() }
 func (p *Progress) addError(msg string) {
 	p.mu.Lock()
 	p.Errors = append(p.Errors, msg)

@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/bjluckow/fsvector/internal/clients"
-	"github.com/bjluckow/fsvector/internal/reindex"
+	"github.com/bjluckow/fsvector/internal/indexer"
 	"github.com/bjluckow/fsvector/internal/store"
 	"github.com/bjluckow/fsvector/pkg/api"
 	"github.com/bjluckow/fsvector/pkg/parse"
@@ -19,13 +19,13 @@ import (
 
 type Server struct {
 	embedClient *clients.EmbedClient
-	progress    *reindex.Progress
-	trigger     chan<- reindex.Trigger // send-only
+	progress    *indexer.Progress
+	trigger     chan<- indexer.Trigger // send-only
 	started     time.Time
 	sourceURI   string
 }
 
-func New(embedClient *clients.EmbedClient, progress *reindex.Progress, trigger chan<- reindex.Trigger, sourceURI string) *Server {
+func New(embedClient *clients.EmbedClient, progress *indexer.Progress, trigger chan<- indexer.Trigger, sourceURI string) *Server {
 	return &Server{
 		embedClient: embedClient,
 		progress:    progress,
@@ -91,7 +91,7 @@ func (s *Server) handleReindex(w http.ResponseWriter, r *http.Request) {
 	purge := r.URL.Query().Get("purge") == "true"
 
 	select {
-	case s.trigger <- reindex.Trigger{Purge: purge}:
+	case s.trigger <- indexer.Trigger{Purge: purge}:
 		json.NewEncoder(w).Encode(map[string]string{"status": "triggered"})
 	default:
 		json.NewEncoder(w).Encode(map[string]string{"status": "already running"})
