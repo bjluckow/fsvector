@@ -122,10 +122,9 @@ func main() {
 			Bucket:             cfg.S3Bucket,
 			Prefix:             cfg.S3Prefix,
 			LargeFileThreshold: cfg.LargeFileThreshold,
-			PollInterval:       0,
 		})
 	default:
-		src = source.NewLocalSource(cfg.WatchPath, true, 0)
+		src = source.NewLocalSource(cfg.WatchPath, true)
 	}
 
 	fmt.Printf("  source       : %s\n", src.URI())
@@ -144,6 +143,7 @@ func main() {
 		MinChunkSize:    cfg.MinChunkSize,
 		VideoFrameRate:  cfg.VideoFrameRate,
 		DownloadWorkers: 8,
+		PollInterval:    0,
 	}, src, work, progress)
 
 	// ── pipeline config ───────────────────────────────────────────────────────

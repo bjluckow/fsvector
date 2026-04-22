@@ -3,7 +3,6 @@ package source
 import (
 	"context"
 	"strings"
-	"time"
 
 	"github.com/bjluckow/fsvector/internal/fswalk"
 	"github.com/bjluckow/fsvector/internal/model"
@@ -14,14 +13,12 @@ import (
 type LocalSource struct {
 	Root         string
 	WatchEnabled bool
-	pollInterval time.Duration
 }
 
-func NewLocalSource(root string, watch bool, pollInterval time.Duration) *LocalSource {
+func NewLocalSource(root string, watch bool) *LocalSource {
 	return &LocalSource{
 		Root:         root,
 		WatchEnabled: watch,
-		pollInterval: pollInterval,
 	}
 }
 
@@ -33,9 +30,8 @@ func (s *LocalSource) Walk(ctx context.Context) ([]model.SourceFile, error) {
 	return convertFileInfos(files), nil
 }
 
-func (s *LocalSource) Reader() FileReader          { return &LocalReader{} }
-func (s *LocalSource) URI() string                 { return "local://" + s.Root }
-func (s *LocalSource) PollInterval() time.Duration { return s.pollInterval }
+func (s *LocalSource) Reader() FileReader { return &LocalReader{} }
+func (s *LocalSource) URI() string        { return "local://" + s.Root }
 
 // Watch implements Watchable — only available when WatchEnabled is true.
 func (s *LocalSource) Watch(ctx context.Context, events chan<- Event) error {
