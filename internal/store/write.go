@@ -42,7 +42,7 @@ type ChunkRow struct {
 	ChunkIndex  int
 	ChunkType   string
 	EmbedModel  string
-	Embedding   pgvector.Vector
+	Embedding   *pgvector.Vector
 	TextContent *string // nil = SQL NULL
 	Metadata    json.RawMessage
 }

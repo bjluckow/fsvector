@@ -351,6 +351,10 @@ func (e *VideoExtractor) Extract(ctx context.Context, fi source.FileInfo) ([]*Wo
 					MimeType:  "image/jpeg",
 					Size:      int64(len(frame.Data)),
 					ItemIndex: frame.Index,
+					Metadata: mustJSON(map[string]any{
+						"timestamp_ms": frame.TimestampMs,
+						"fps":          e.FrameRate,
+					}),
 				})
 				if err != nil {
 					fmt.Printf("      upsert frame item %s[%d]: %v\n", fi.Path, frame.Index, err)

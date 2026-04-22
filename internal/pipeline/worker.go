@@ -3,6 +3,7 @@ package pipeline
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 )
 
@@ -31,7 +32,6 @@ func (w *BatchWorker) Run(ctx context.Context) {
 		select {
 		case item, ok := <-w.Queue:
 			if !ok {
-				// channel closed — flush remaining items and exit
 				w.flush(ctx, buf)
 				return
 			}
@@ -40,14 +40,16 @@ func (w *BatchWorker) Run(ctx context.Context) {
 				w.flush(ctx, buf)
 				buf = nil
 			}
-
 		case <-ticker.C:
 			if len(buf) > 0 {
 				w.flush(ctx, buf)
 				buf = nil
 			}
-
 		case <-ctx.Done():
+			// release any buffered items
+			for _, item := range buf {
+				item.FileData.Release()
+			}
 			return
 		}
 	}
@@ -77,22 +79,27 @@ type ParallelWorker struct {
 // items are done, or the context is canceled.
 func (w *ParallelWorker) Run(ctx context.Context) {
 	sem := make(chan struct{}, w.MaxWorkers)
+	var wg sync.WaitGroup
 
-	for item := range w.Queue {
+	for {
 		select {
+		case item, ok := <-w.Queue:
+			if !ok {
+				wg.Wait()
+				return
+			}
+			sem <- struct{}{}
+			wg.Add(1)
+			go func(it *WorkItem) {
+				defer func() {
+					<-sem
+					wg.Done()
+				}()
+				w.Process(ctx, it)
+			}(item)
 		case <-ctx.Done():
+			wg.Wait()
 			return
-		case sem <- struct{}{}:
 		}
-
-		go func(it *WorkItem) {
-			defer func() { <-sem }()
-			w.Process(ctx, it)
-		}(item)
-	}
-
-	// drain: wait for all in-flight goroutines to finish
-	for i := 0; i < w.MaxWorkers; i++ {
-		sem <- struct{}{}
 	}
 }

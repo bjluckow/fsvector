@@ -129,19 +129,33 @@ func main() {
 	fmt.Printf("  source       : %s\n", src.URI())
 
 	// ── pipeline config ───────────────────────────────────────────────────────
-	pl := pipeline.Pipeline{
+	pl := pipeline.New(pipeline.Config{
 		Reader:           src.Reader(),
 		EmbedClient:      embedClient,
 		ConvertClient:    convertClient,
 		TranscribeClient: transcribeClient,
 		VisionClient:     visionClient,
 		EmbedModel:       health.Model,
-		MinEmbedSize:     cfg.MinEmbedSize,
 		ChunkSize:        cfg.ChunkSize,
 		ChunkOverlap:     cfg.ChunkOverlap,
 		MinChunkSize:     cfg.MinChunkSize,
 		VideoFrameRate:   cfg.VideoFrameRate,
-	}
+		EnableCaption:    cfg.EnableCaption,
+		EnableOCR:        cfg.EnableOCR,
+		EnableTranscribe: cfg.EnableTranscribe,
+
+		// batch/concurrency (use defaults or pull from config)
+		// EmbedBatchSize:     32,
+		// CaptionBatchSize:   4,
+		// DownloadWorkers:    8,
+		// OCRWorkers:         4,
+		// TranscribeWorkers:  2,
+
+		// feature flags
+		EmbedOCRText:        true,
+		EmbedTranscriptText: true,
+		EmbedCaptionText:    false,
+	})
 
 	// ── progress + trigger (single for now, multi-source later) ──────────────
 	progress := &reindex.Progress{}

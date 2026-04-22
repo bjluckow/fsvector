@@ -1,27 +1,50 @@
 package pipeline
 
-import "fmt"
+import (
+	"context"
+	"fmt"
+)
 
-// StageQueues maps each stage to its worker's input channel.
-type StageQueues map[Stage]chan *WorkItem
+// router manages stage queues and gates work items based on
+// enabled stages. Single point of control for feature flags.
+type router struct {
+	ctx     context.Context
+	queues  map[Stage]chan *WorkItem
+	enabled map[Stage]bool
+}
 
-// Route sends a WorkItem to the appropriate queue based on its Stage.
-// If no queue exists for the stage, the item's FileData refcount is
-// released to prevent memory leaks, and the item is dropped with a log.
-func (sq StageQueues) Route(item *WorkItem) {
-	q, ok := sq[item.Stage]
-	if !ok {
-		fmt.Printf("    router: no queue for stage %s (item %s), dropping\n",
-			item.Stage, item.FileData.FileInfo.Path)
+func newRouter(ctx context.Context, queues map[Stage]chan *WorkItem, enabled map[Stage]bool) *router {
+	return &router{ctx: ctx, queues: queues, enabled: enabled}
+}
+
+func (r *router) route(item *WorkItem) {
+	if !r.enabled[item.Stage] {
 		item.FileData.Release()
 		return
 	}
-	q <- item
+	q, ok := r.queues[item.Stage]
+	if !ok {
+		fmt.Printf("    router: no queue for stage %s, dropping\n", item.Stage)
+		item.FileData.Release()
+		return
+	}
+	select {
+	case q <- item:
+	case <-r.ctx.Done():
+		item.FileData.Release()
+	}
 }
 
-// RouteMany sends multiple WorkItems to their respective queues.
-func (sq StageQueues) RouteMany(items []*WorkItem) {
+func (r *router) routeMany(items []*WorkItem) {
 	for _, item := range items {
-		sq.Route(item)
+		r.route(item)
 	}
+}
+
+func (r *router) ch(stage Stage) <-chan *WorkItem {
+	return r.queues[stage]
+}
+
+func (r *router) closeCh(stage Stage) {
+	close(r.queues[stage])
 }

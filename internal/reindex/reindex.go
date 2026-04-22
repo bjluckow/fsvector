@@ -21,7 +21,7 @@ type Trigger struct {
 
 // IndexAndPoll manages the full lifecycle of a single source:
 // initial reindex, optional watching, and periodic polling.
-func IndexAndPoll(ctx context.Context, src source.Source, pl pipeline.Pipeline, progress *Progress, trigger <-chan Trigger) {
+func IndexAndPoll(ctx context.Context, src source.Source, pl *pipeline.Pipeline, progress *Progress, trigger <-chan Trigger) {
 	// initial reindex
 	if err := Reindex(ctx, src, pl, progress); err != nil {
 		fmt.Fprintf(os.Stderr, "reindex %s: %v\n", src.URI(), err)
@@ -67,7 +67,7 @@ func IndexAndPoll(ctx context.Context, src source.Source, pl pipeline.Pipeline, 
 }
 
 // Reindex diffs the source against the DB and brings the index into sync.
-func Reindex(ctx context.Context, src source.Source, pl pipeline.Pipeline, progress *Progress) error {
+func Reindex(ctx context.Context, src source.Source, pl *pipeline.Pipeline, progress *Progress) error {
 	progress.start()
 	defer progress.finish()
 
@@ -166,96 +166,75 @@ func deleteStale(
 
 func indexNew(
 	ctx context.Context,
-	pl pipeline.Pipeline,
+	pl *pipeline.Pipeline,
 	fsFiles []source.FileInfo,
 	dbFiles map[string]string,
 	progress *Progress,
 ) error {
+	var toProcess []source.FileInfo
+
 	for _, fi := range fsFiles {
 		existingHash, inDB := dbFiles[fi.Path]
 		if inDB && existingHash == fi.Hash {
 			progress.incSkipped()
 			continue
 		}
-		if err := indexFile(ctx, pl, fi, progress); err != nil {
-			fmt.Fprintf(os.Stderr, "    %s: %v\n", fi.Path, err)
-			progress.addError(fmt.Sprintf("%s: %v", fi.Path, err))
-		}
-	}
-	return nil
-}
 
-func indexFile(
-	ctx context.Context,
-	pl pipeline.Pipeline,
-	fi source.FileInfo,
-	progress *Progress,
-) error {
-	// dedup check
-	canonicalPath, isDupe, err := store.FindByHash(ctx, fi.Hash)
-	if err != nil {
-		return fmt.Errorf("hash check: %w", err)
+		// dedup check — still per-file, still in reindex
+		canonicalPath, isDupe, err := store.FindByHash(ctx, fi.Hash)
+		if err != nil {
+			progress.addError(fmt.Sprintf("hash check %s: %v", fi.Path, err))
+			continue
+		}
+		if isDupe && canonicalPath != fi.Path {
+			cp := canonicalPath
+			if _, err := store.UpsertFileRow(ctx, store.FileRow{
+				Path:          fi.Path,
+				Source:        fi.SourceURI,
+				CanonicalPath: &cp,
+				Modality:      modalityOrDefault(fi.Ext),
+				FileName:      fi.Name,
+				FileExt:       fi.Ext,
+				MimeType:      fi.MimeType,
+				Size:          fi.Size,
+				ContentHash:   fi.Hash,
+				CreatedAt:     fi.CreatedAt,
+				ModifiedAt:    fi.ModifiedAt,
+			}); err != nil {
+				progress.addError(fmt.Sprintf("dupe upsert %s: %v", fi.Path, err))
+			} else {
+				fmt.Printf("    duplicate %s -> %s\n", fi.Path, canonicalPath)
+				progress.incIndexed()
+			}
+			continue
+		}
+
+		toProcess = append(toProcess, fi)
 	}
-	if isDupe && canonicalPath != fi.Path {
-		cp := canonicalPath
-		f := store.UpsertFile{
-			Path:           fi.Path,
-			Source:         fi.SourceURI,
-			CanonicalPath:  &cp,
-			ContentHash:    fi.Hash,
-			Size:           fi.Size,
-			MimeType:       fi.MimeType,
-			Modality:       modalityOrDefault(fi.Ext),
-			FileName:       fi.Name,
-			FileExt:        fi.Ext,
-			FileCreatedAt:  &fi.CreatedAt,
-			FileModifiedAt: &fi.ModifiedAt,
-		}
-		if err := store.Upsert(ctx, f); err != nil {
-			return fmt.Errorf("dupe upsert: %w", err)
-		}
-		fmt.Printf("    duplicate %s -> %s\n", fi.Path, canonicalPath)
-		progress.incIndexed()
+
+	if len(toProcess) == 0 {
 		return nil
 	}
 
-	result, err := pl.ReadAndProcessFile(ctx, fi)
-	if err != nil {
-		return fmt.Errorf("pipeline: %w", err)
-	}
-	if result.Skipped {
-		fmt.Printf("    skipped %s (%s)\n", fi.Path, result.SkipReason)
-		progress.incSkipped()
-		return nil
-	}
+	progress.setTotal(len(toProcess))
+	fmt.Printf("  %d files to process\n", len(toProcess))
 
-	for _, f := range result.Files {
-		if err := store.Upsert(ctx, f); err != nil {
-			return fmt.Errorf("upsert chunk %d: %w", f.ChunkIndex, err)
+	return pl.RunBatch(ctx, toProcess, func(path string, status string) {
+		switch status {
+		case "indexed":
+			progress.incIndexed()
+		case "skipped":
+			progress.incSkipped()
+		case "error":
+			progress.addError(path)
 		}
-	}
-	if err := store.DeleteStaleChunks(ctx, fi.Path, pl.EmbedModel, len(result.Files)); err != nil {
-		fmt.Fprintf(os.Stderr, "    stale chunks %s: %v\n", fi.Path, err)
-	}
-
-	fmt.Printf("    indexed %s (%s, %d chunks)\n",
-		fi.Path, result.Files[0].Modality, len(result.Files))
-	progress.incIndexed()
-	return nil
-}
-
-func modalityOrDefault(ext string) string {
-	m, ok := pipeline.Modality(ext)
-	if !ok {
-		return "unknown"
-	}
-	return m
+	})
 }
 
 func handleEvents(
 	ctx context.Context,
 	src source.Source,
-	pl pipeline.Pipeline,
+	pl *pipeline.Pipeline,
 	events <-chan source.Event,
 ) {
 	for {
@@ -277,27 +256,20 @@ func handleEvents(
 					fmt.Fprintf(os.Stderr, "  stat %s: %v\n", e.Path, err)
 					continue
 				}
-				result, err := pl.ReadAndProcessFile(ctx, fi)
-				if err != nil {
+				if err := pl.RunBatch(ctx, []source.FileInfo{fi}, nil); err != nil {
 					fmt.Fprintf(os.Stderr, "  pipeline %s: %v\n", e.Path, err)
 					continue
 				}
-				if result.Skipped {
-					continue
-				}
-				for _, f := range result.Files {
-					if err := store.Upsert(ctx, f); err != nil {
-						fmt.Fprintf(os.Stderr, "  upsert %s chunk %d: %v\n",
-							e.Path, f.ChunkIndex, err)
-					}
-				}
-				if err := store.DeleteStaleChunks(ctx, e.Path,
-					pl.EmbedModel, len(result.Files)); err != nil {
-					fmt.Fprintf(os.Stderr, "  stale chunks %s: %v\n", e.Path, err)
-				}
-				fmt.Printf("  %s %s (%s, %d chunks)\n",
-					e.Kind, e.Path, result.Files[0].Modality, len(result.Files))
+				fmt.Printf("  %s %s\n", e.Kind, e.Path)
 			}
 		}
 	}
+}
+
+func modalityOrDefault(ext string) string {
+	m, ok := pipeline.Modality(ext)
+	if !ok {
+		return "unknown"
+	}
+	return m
 }
