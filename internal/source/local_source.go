@@ -3,9 +3,9 @@ package source
 import (
 	"context"
 	"strings"
-	"time"
 
 	"github.com/bjluckow/fsvector/internal/fswalk"
+	"github.com/bjluckow/fsvector/internal/model"
 )
 
 // LocalSource wraps fsindex and watcher for local filesystem access.
@@ -13,18 +13,16 @@ import (
 type LocalSource struct {
 	Root         string
 	WatchEnabled bool
-	pollInterval time.Duration
 }
 
-func NewLocalSource(root string, watch bool, pollInterval time.Duration) *LocalSource {
+func NewLocalSource(root string, watch bool) *LocalSource {
 	return &LocalSource{
 		Root:         root,
 		WatchEnabled: watch,
-		pollInterval: pollInterval,
 	}
 }
 
-func (s *LocalSource) Walk(ctx context.Context) ([]FileInfo, error) {
+func (s *LocalSource) Walk(ctx context.Context) ([]model.SourceFile, error) {
 	files, err := fswalk.Walk(s.Root)
 	if err != nil {
 		return nil, err
@@ -32,9 +30,8 @@ func (s *LocalSource) Walk(ctx context.Context) ([]FileInfo, error) {
 	return convertFileInfos(files), nil
 }
 
-func (s *LocalSource) Reader() FileReader          { return &LocalReader{} }
-func (s *LocalSource) URI() string                 { return "local://" + s.Root }
-func (s *LocalSource) PollInterval() time.Duration { return s.pollInterval }
+func (s *LocalSource) Reader() FileReader { return &LocalReader{} }
+func (s *LocalSource) URI() string        { return "local://" + s.Root }
 
 // Watch implements Watchable — only available when WatchEnabled is true.
 func (s *LocalSource) Watch(ctx context.Context, events chan<- Event) error {
@@ -49,17 +46,17 @@ func (s *LocalSource) Watch(ctx context.Context, events chan<- Event) error {
 
 // FileInfoFromPath returns a source.FileInfo for a single local path.
 // Used by handleEvents for fsnotify file events.
-func FileInfoFromPath(path string) (FileInfo, error) {
+func FileInfoFromPath(path string) (model.SourceFile, error) {
 	fi, err := fswalk.FileInfoFromPath(path)
 	if err != nil {
-		return FileInfo{}, err
+		return model.SourceFile{}, err
 	}
 	return convertFileInfo(fi), nil
 }
 
 // convertFileInfo converts a single fsindex.FileInfo to source.FileInfo.
-func convertFileInfo(f fswalk.FileInfo) FileInfo {
-	return FileInfo{
+func convertFileInfo(f fswalk.FileInfo) model.SourceFile {
+	return model.SourceFile{
 		Path:       f.Path,
 		Name:       f.Name,
 		Ext:        strings.ToLower(f.Ext),
@@ -73,8 +70,8 @@ func convertFileInfo(f fswalk.FileInfo) FileInfo {
 }
 
 // convertFileInfos converts fsindex.FileInfo slice to source.FileInfo slice.
-func convertFileInfos(files []fswalk.FileInfo) []FileInfo {
-	result := make([]FileInfo, len(files))
+func convertFileInfos(files []fswalk.FileInfo) []model.SourceFile {
+	result := make([]model.SourceFile, len(files))
 	for i, f := range files {
 		result[i] = convertFileInfo(f)
 	}

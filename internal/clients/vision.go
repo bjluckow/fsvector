@@ -31,6 +31,10 @@ type CaptionResponse struct {
 	Caption string `json:"caption"`
 }
 
+type captionBatchResponse struct {
+	Captions []*string `json:"captions"` // nullable per-item
+}
+
 type OCRResponse struct {
 	Text string `json:"text"`
 }
@@ -82,6 +86,35 @@ func (c *VisionClient) Caption(ctx context.Context, filename string, data []byte
 		return nil, fmt.Errorf("visionsvc caption decode: %w", err)
 	}
 	return &r, nil
+}
+
+// CaptionBatch sends multiple images to /caption/batch and returns
+// captions parallel to the input. Empty string for failed images.
+func (c *VisionClient) CaptionBatch(ctx context.Context, images []FileInput) ([]string, error) {
+	body, contentType, err := buildMultipartBatch("files", images)
+	if err != nil {
+		return nil, fmt.Errorf("visionsvc caption batch: build multipart: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		c.BaseURL+"/caption/batch", bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", contentType)
+
+	var r captionBatchResponse
+	if err := doJSON(c.HTTP, req, &r); err != nil {
+		return nil, fmt.Errorf("visionsvc caption batch: %w", err)
+	}
+
+	out := make([]string, len(r.Captions))
+	for i, v := range r.Captions {
+		if v != nil {
+			out[i] = *v
+		}
+	}
+	return out, nil
 }
 
 func (c *VisionClient) OCR(ctx context.Context, filename string, data []byte) (*OCRResponse, error) {

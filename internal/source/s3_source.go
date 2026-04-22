@@ -10,6 +10,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/bjluckow/fsvector/internal/model"
 	"github.com/gabriel-vasile/mimetype"
 )
 
@@ -24,7 +25,6 @@ type S3Config struct {
 	Bucket             string
 	Prefix             string
 	LargeFileThreshold int64
-	PollInterval       time.Duration
 }
 
 // S3Source implements Source for S3 buckets.
@@ -44,8 +44,8 @@ func NewS3Source(cfg S3Config) *S3Source {
 	}
 }
 
-func (s *S3Source) Walk(ctx context.Context) ([]FileInfo, error) {
-	var files []FileInfo
+func (s *S3Source) Walk(ctx context.Context) ([]model.SourceFile, error) {
+	var files []model.SourceFile
 
 	paginator := s3.NewListObjectsV2Paginator(s.cfg.Client, &s3.ListObjectsV2Input{
 		Bucket: aws.String(s.cfg.Bucket),
@@ -89,7 +89,7 @@ func (s *S3Source) Walk(ctx context.Context) ([]FileInfo, error) {
 				size = *obj.Size
 			}
 
-			files = append(files, FileInfo{
+			files = append(files, model.SourceFile{
 				Path:       s3URI(s.cfg.Bucket, key),
 				Name:       name,
 				Ext:        ext,
@@ -114,8 +114,6 @@ func (s *S3Source) URI() string {
 	}
 	return fmt.Sprintf("s3://%s", s.cfg.Bucket)
 }
-
-func (s *S3Source) PollInterval() time.Duration { return s.cfg.PollInterval }
 
 // s3URI returns the full S3 URI for a key.
 func s3URI(bucket, key string) string {

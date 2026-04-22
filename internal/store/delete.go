@@ -69,3 +69,26 @@ func PurgeSoftDeleted(ctx context.Context) (int64, error) {
 	}
 	return tag.RowsAffected(), nil
 }
+
+// DeleteStaleItems removes items (and their cascaded chunks) for a file
+// that no longer exist after re-extraction. For example, if a video
+// previously had 10 frames but now has 8, items 8 and 9 should be removed.
+func DeleteStaleItems(ctx context.Context, fileID int64, itemType string, keepCount int) error {
+	_, err := pool.Exec(ctx, `
+		DELETE FROM items
+		WHERE file_id = $1 AND item_type = $2 AND item_index >= $3`,
+		fileID, itemType, keepCount,
+	)
+	return err
+}
+
+// DeleteStaleChunks removes chunks for an item that are beyond the current
+// chunk count. Used when re-processing produces fewer chunks than before.
+func DeleteStaleChunksByItem(ctx context.Context, itemID int64, keepCount int) error {
+	_, err := pool.Exec(ctx, `
+		DELETE FROM chunks
+		WHERE item_id = $1 AND chunk_index >= $2`,
+		itemID, keepCount,
+	)
+	return err
+}

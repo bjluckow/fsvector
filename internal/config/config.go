@@ -26,11 +26,14 @@ type Config struct {
 	CaptionFrames bool
 
 	// Pipeline
-	ChunkSize      int
-	ChunkOverlap   int
-	MinChunkSize   int
-	MinEmbedSize   int64
-	VideoFrameRate float64
+	ChunkSize        int
+	ChunkOverlap     int
+	MinChunkSize     int
+	MinEmbedSize     int64
+	VideoFrameRate   float64
+	EnableCaption    bool
+	EnableOCR        bool
+	EnableTranscribe bool
 
 	// Source
 	SourceType         string
@@ -70,6 +73,9 @@ func Load() (*Config, error) {
 	viper.SetDefault("pipeline.min_chunk_size", 10)
 	viper.SetDefault("pipeline.min_embed_size", 100)
 	viper.SetDefault("pipeline.video_frame_rate", 1.0)
+	viper.SetDefault("pipeline.enable_caption", true)
+	viper.SetDefault("pipeline.enable_ocr", true)
+	viper.SetDefault("pipeline.enable_transcribe", true)
 	viper.SetDefault("source.type", "local")
 	viper.SetDefault("source.watch_path", "/data/source")
 	viper.SetDefault("source.s3_region", "us-east-1")
@@ -101,6 +107,9 @@ func Load() (*Config, error) {
 		MinChunkSize:       viper.GetInt("pipeline.min_chunk_size"),
 		MinEmbedSize:       viper.GetInt64("pipeline.min_embed_size"),
 		VideoFrameRate:     viper.GetFloat64("pipeline.video_frame_rate"),
+		EnableCaption:      viper.GetBool("pipeline.enable_caption"),
+		EnableOCR:          viper.GetBool("pipeline.enable_ocr"),
+		EnableTranscribe:   viper.GetBool("pipeline.enable_transcribe"),
 		SourceType:         viper.GetString("source.type"),
 		WatchPath:          viper.GetString("source.watch_path"),
 		S3Bucket:           viper.GetString("source.s3_bucket"),

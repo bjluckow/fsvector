@@ -10,11 +10,13 @@ import (
 
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/bjluckow/fsvector/internal/clients"
 	"github.com/bjluckow/fsvector/internal/config"
+	"github.com/bjluckow/fsvector/internal/indexer"
+	"github.com/bjluckow/fsvector/internal/model"
 	"github.com/bjluckow/fsvector/internal/pipeline"
-	"github.com/bjluckow/fsvector/internal/reindex"
 	"github.com/bjluckow/fsvector/internal/server"
 	"github.com/bjluckow/fsvector/internal/source"
 	"github.com/bjluckow/fsvector/internal/store"
@@ -120,37 +122,56 @@ func main() {
 			Bucket:             cfg.S3Bucket,
 			Prefix:             cfg.S3Prefix,
 			LargeFileThreshold: cfg.LargeFileThreshold,
-			PollInterval:       0,
 		})
 	default:
-		src = source.NewLocalSource(cfg.WatchPath, true, 0)
+		src = source.NewLocalSource(cfg.WatchPath, true)
 	}
 
 	fmt.Printf("  source       : %s\n", src.URI())
 
-	// ── pipeline config ───────────────────────────────────────────────────────
-	pl := pipeline.Pipeline{
-		Reader:           src.Reader(),
-		EmbedClient:      embedClient,
-		ConvertClient:    convertClient,
-		TranscribeClient: transcribeClient,
-		VisionClient:     visionClient,
-		EmbedModel:       health.Model,
-		MinEmbedSize:     cfg.MinEmbedSize,
-		ChunkSize:        cfg.ChunkSize,
-		ChunkOverlap:     cfg.ChunkOverlap,
-		MinChunkSize:     cfg.MinChunkSize,
-		VideoFrameRate:   cfg.VideoFrameRate,
-	}
+	// ── work channel ─────────────────────────────────────────────────────────
+	work := make(chan model.Item, 256)
 
-	// ── progress + trigger (single for now, multi-source later) ──────────────
-	progress := &reindex.Progress{}
-	trigger := make(chan reindex.Trigger, 1)
+	// ── indexer config ────────────────────────────────────────────────────────
+	progress := &indexer.Progress{}
+	trigger := make(chan indexer.Trigger, 1)
+
+	idx := indexer.New(indexer.Config{
+		ConvertClient:   convertClient,
+		ChunkSize:       cfg.ChunkSize,
+		ChunkOverlap:    cfg.ChunkOverlap,
+		MinChunkSize:    cfg.MinChunkSize,
+		VideoFrameRate:  cfg.VideoFrameRate,
+		DownloadWorkers: 8,
+		PollInterval:    0,
+	}, src, work, progress)
+
+	// ── pipeline config ───────────────────────────────────────────────────────
+	pl := pipeline.New(pipeline.Config{
+		EmbedClient:         embedClient,
+		VisionClient:        visionClient,
+		TranscribeClient:    transcribeClient,
+		EmbedModel:          health.Model,
+		EnableCaption:       cfg.EnableCaption,
+		EnableOCR:           cfg.EnableOCR,
+		EnableTranscribe:    cfg.EnableTranscribe,
+		EmbedOCRText:        true,
+		EmbedTranscriptText: true,
+		EmbedCaptionText:    false,
+	}, work)
 
 	// ── start HTTP server ─────────────────────────────────────────────────────
 	srv := server.New(embedClient, progress, trigger, src.URI())
 	go srv.Serve(ctx, cfg.DaemonPort)
 
-	// ── start reindex goroutine per source ───────────────────────────────────
-	reindex.IndexAndPoll(ctx, src, pl, progress, trigger)
+	// ── start indexer + pipeline ──────────────────────────────────────────────
+	g, ctx := errgroup.WithContext(ctx)
+	g.Go(func() error {
+		defer idx.Close()
+		return idx.Run(ctx, trigger)
+	})
+	g.Go(func() error {
+		return pl.Start(ctx)
+	})
+	g.Wait()
 }
