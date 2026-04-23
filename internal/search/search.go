@@ -1,10 +1,11 @@
-package store
+package search
 
 import (
 	"context"
 	"fmt"
 	"time"
 
+	"github.com/bjluckow/fsvector/internal/store"
 	"github.com/pgvector/pgvector-go"
 )
 
@@ -146,7 +147,7 @@ func Search(ctx context.Context, q SearchQuery) ([]SearchResult, error) {
 		LIMIT $2 OFFSET $3
 	`, inner)
 
-	rows, err := pool.Query(ctx, sql, args...)
+	rows, err := store.Pool().Query(ctx, sql, args...)
 	if err != nil {
 		return nil, fmt.Errorf("search: %w", err)
 	}

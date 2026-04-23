@@ -12,6 +12,7 @@ import (
 
 	"github.com/bjluckow/fsvector/internal/clients"
 	"github.com/bjluckow/fsvector/internal/indexer"
+	"github.com/bjluckow/fsvector/internal/search"
 	"github.com/bjluckow/fsvector/internal/store"
 	"github.com/bjluckow/fsvector/pkg/api"
 	"github.com/bjluckow/fsvector/pkg/parse"
@@ -133,7 +134,7 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// build search query
-	q := store.SearchQuery{
+	q := search.SearchQuery{
 		Query:  req.Query,
 		Vector: vectors[0],
 		Limit:  req.Limit,
@@ -185,13 +186,13 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		q.MinScore = &req.MinScore
 	}
 
-	results, err := store.Search(r.Context(), q)
+	results, err := search.Search(r.Context(), q)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	results = store.Normalize(results)
+	results = search.Normalize(results)
 
 	// convert to api types
 	apiResults := make([]api.SearchResult, len(results))
