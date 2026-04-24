@@ -1,7 +1,8 @@
 // -- Common --
 
-export const MODALITIES = ["image", "text", "audio", "video", "email"] as const;
-export type Modality = typeof MODALITIES[number];
+export type Modality = "image" | "text" | "audio" | "video" | "email";
+
+export const MODALITIES: Modality[] = ["image", "text", "audio", "video", "email"];
 
 // -- Search --
 
@@ -16,7 +17,7 @@ export interface SearchResult {
   file_name: string;
   chunk_type: string;
   file_created_at: string;
-  file_modified_at: string;
+  file_modified_at: string | null;
 }
 
 export interface SearchResponse {
@@ -31,6 +32,22 @@ export interface SearchParams {
   modality?: Modality;
   ext?: string;
 }
+
+// -- Grouped (client-side, derived from SearchResult[]) --
+
+export interface FileResult {
+  path: string;
+  file_name: string;
+  modality: Modality;
+  ext: string;
+  size: number;
+  norm_score: number;
+  file_created_at: string;
+  file_modified_at: string | null;
+  snippets: string[];
+}
+
+
 
 // -- Status --
 
@@ -65,16 +82,3 @@ export interface StatsResponse {
   duplicates: number;
 }
 
-// -- Grouped (client-side, derived from SearchResult[]) --
-
-export interface FileResult {
-  path: string;
-  file_name: string;
-  modality: Modality;
-  ext: string;
-  size: number;
-  norm_score: number;
-  file_created_at: string;
-  file_modified_at: string;
-  snippets: string[];
-}
