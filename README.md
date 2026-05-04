@@ -1,4 +1,4 @@
-# fsvector
+# fsvector (WORK IN PROGRESS)
 
 A local-first tool for applying vector embeddings to file system directories,
 enabling semantic search and classification of unstructured files. Embedding models are hot-swappable, making it easy to test and compare results locally.
